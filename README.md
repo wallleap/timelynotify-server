@@ -240,6 +240,10 @@ PLATFORM=linux/amd64,linux/arm64 bin/publish   # 指定架构
 * [OPTIMIZATION_REVIEW.md](./docs/OPTIMIZATION_REVIEW.md) — 优化建议可行性核对（对现有代码逐条标注已实现/未实现）
 * [DIFFERENCES.md](./DIFFERENCES.md) — 相对上游的改动清单
 
+## 其它
+
+`push_test` 测试前需要修改 `deviceToken` 为真实的 Bark App 上显示的 Device Token
+
 ## License
 
 MIT，见 [LICENSE](LICENSE)。上游版权归原作者（mritd / Finb）所有。
