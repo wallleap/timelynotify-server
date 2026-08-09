@@ -16,6 +16,10 @@ import (
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 
+// pushAPNs is the seam used by push() to deliver to APNs. Tests override it to
+// run the push pipeline offline; production keeps the real APNs client.
+var pushAPNs = func(msg *apns.PushMessage) (int, error) { return apns.Push(msg) }
+
 func init() {
 	// V2 API
 	registerRouteWithWeight("push", 50, func(router fiber.Router) {
@@ -267,7 +271,7 @@ func push(params map[string]interface{}) (int, error) {
 	// Published once the device token is resolved, independent of iOS delivery.
 	gotifyPublish(&msg)
 
-	code, err := apns.Push(&msg)
+	code, err := pushAPNs(&msg)
 
 	// Invalid token, delete it from database.
 	if code == 410 || (code == 400 && strings.Contains(err.Error(), "BadDeviceToken")) {
