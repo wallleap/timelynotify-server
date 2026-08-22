@@ -1,5 +1,30 @@
 <a name="unreleased"></a>
 
+## [v0.5.0](https://github.com/wallleap/timelynotify-server/compare/v0.4.0...v0.5.0)
+
+> 2026-08-22
+
+### Documentation
+
+- note push_test deviceToken requirement
+- sync Basic Auth whitelist (/info) across README, TOKENS, DIFFERENCES and review notes
+- **api:** document auth schemes, full Basic Auth whitelist and /metrics endpoint
+
+### Features
+
+- 新增鸿蒙(HarmonyOS)原生推送支持
+
+### Maintenance
+
+- 重命名项目为 timelynotify-server
+
+### Tests
+
+- **authfree:** cover healthz, lookalikes, case, trailing-slash and prefix variants
+- **gotifycompat:** cover device-scoped delete, token compare and persist-error paths
+- **push:** stub APNs seek to run push tests offline and cover edge/error cases
+
+
 ## [v0.4.0](https://github.com/wallleap/timelynotify-server/compare/v0.3.0...v0.4.0)
 
 > 2026-08-08
@@ -13,6 +38,7 @@
 
 ### Documentation
 
+- update CHANGELOG for v0.4.0
 - **readme:** clarify Basic Auth request header for non-whitelisted paths
 
 ### Features
@@ -200,7 +226,7 @@
 - 优化 时区设置
 - add apns push msg payload size check
 - add delete message endpoints to gotify compat
-- rebrand finb/bark-server fork as timelynotify-server
+- rebrand finb/bark-server fork as hotify-bark-server
 - 添加并设置时区为中国时区
 - 优化时区设置
 - **apns:** add apple CAs
