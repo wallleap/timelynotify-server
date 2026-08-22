@@ -9,29 +9,17 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 
 ## 接口
 
-| Method | Path | 认证 | 说明 |
-|---|---|---|---|
-| GET | `/version` | 无 | 返回 `{"version":"<build 版本>"}`，供 hotify-bridge 同机探测 |
-| GET | `/message?token=<clientToken>&limit=<N>&since=<id>` | 客户端 token | 返回历史消息 `{"messages":[...]}`，id 降序（最新在前），`limit` 默认 100 上限 200，`since` 过滤 `id < since` |
-| DELETE | `/message?token=<clientToken>` | 客户端 token | 清空全部历史消息 |
-| DELETE | `/message/<id>?token=<clientToken>` | 客户端 token | 删除指定 id 的消息；不存在返回 404 |
-| GET | `/stream?token=<clientToken>` | 客户端 token | WebSocket，实时推送**裸** gotify 消息帧（无 `event:` 外壳） |
-
-### 设备级接口
-
-每个 `device_key` 可单独访问自己的历史与实时流，用于**只接收某个设备**的推送监测。
-
-**认证仍用全局 client token**（设备隔离不是凭证），token 读取优先级同全局。设备级接口只透传该 `device_key` 自己产生的消息，其它设备的消息不回。
+每个 `device_key` 可单独访问自己的历史与实时流。**认证使用 client token**，token 读取优先级：`?token=` → `X-Gotify-Key` 头 → `Authorization: Bearer`。设备级接口只透传该 `device_key` 自己产生的消息，其它设备的消息不回。
 
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
-| GET | `/<device_key>/version` | 无 | 同 `/version` 探测 |
+| GET | `/<device_key>/version` | 无 | 设备级探测，返回服务版本号 |
 | GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息（其余参数语义同全局） |
 | DELETE | `/<device_key>/message?token=<clientToken>` | `token` | 清空该设备的历史消息（其它设备保留） |
 | DELETE | `/<device_key>/message/<id>?token=<clientToken>` | `token` | 删除该设备下指定 id；不属于该设备或不存在返回 404 |
 | GET | `/<device_key>/stream?token=<clientToken>` | `token` | WebSocket，实时推送该设备的裸消息帧 |
 
-设备级路径为**静态段**（`/version`、`/message`、`/stream`），优先于旧版 `GET /:device_key/:body` 兼容推送，不会与 `/<device_key>` 单段推送冲突。
+设备级路径为**静态段**（`/version`、`/message`、`/stream`），优先于旧版 `GET /:device_key/:body` 兼容推送，不会与 `/<device_key>` 单段推送冲突。全局 gotify 接口已移除，仅保留设备级路径。
 
 消息帧 / `messages[]` 元素格式（与 Gotify 一致）：
 
@@ -54,7 +42,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
   **推荐用 header 传递**（`X-Gotify-Key` 或 `Authorization: Bearer`）：token 不进入 URL，也就不会出现在
   代理/网关与访问日志里（本服务端访问日志只记路径，不记 query）。生产部署务必启用 TLS
   （`--cert`/`--key` 或反向代理），否则任何 token 传递方式在网络层都是明文。
-- 未授权访问 `/message`、`/stream` 返回 `401`（WebSocket 在握手阶段返回 401）。
+- 未授权访问设备级 `/<device_key>/message`、`/<device_key>/stream` 返回 `401`（WebSocket 在握手阶段返回 401）。
 
 ## 客户端 token
 
@@ -75,11 +63,11 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 在桥的 `bridge_config.yaml` 中配置（或环境变量 `GOTIFY_HTTP_URL` / `GOTIFY_CLIENT_TOKEN`）：
 
 ```yaml
-gotify_url: http://<bark-host>:18080
+gotify_url: http://<bark-host>:18080/<device_key>
 gotify_token: <上面拿到的 client token>
 ```
 
-桥即可像监测 Gotify 一样订阅 bark 的 `/stream` 并回补历史。
+桥即可像监测 Gotify 一样订阅 bark 的 `/<device_key>/stream` 并回补历史。
 
 ## 行为与运维说明
 
@@ -87,11 +75,11 @@ gotify_token: <上面拿到的 client token>
 - **batch 推送会为每个设备各发布一条消息**（每条一次 `push()`），对应每条设备级投递。
 - 消息保留最近 **1000** 条（`<data>/gotify.db`），超出自动裁剪；桥断线回补最多覆盖最新 100 条。
 - 消息 ID 单调递增（bbolt `NextSequence`），重启不倒退；若存储被重置，桥按 id 倒退信号自动重置水位。
-- `/message`、`/stream`、`/version` 及设备级 `/<device_key>/message`、`/<device_key>/stream`、`/<device_key>/version`
+- 设备级 `/<device_key>/message`、`/<device_key>/stream`、`/<device_key>/version`
   已加入基础认证白名单（它们走自己的 token 认证/无需认证），开启 `--user/--password` 时不受影响。
-- 兼容路由说明：`/message`、`/stream`、`/version` 为静态路径，优先于旧版 `GET /:device_key`
+- 兼容路由说明：`/version`、`/message`、`/stream` 为静态路径段（设备级路径 `/<device_key>/version` 等基于这些段），优先于旧版 `GET /:device_key`
   兼容推送；若某个设备 key 恰好叫 `message`/`stream`/`version`，其旧的 GET 兼容推送会命中本接口
-  并返回 `401`，请改用 `POST /push` 或换设备 key。
+  并返回 `401`，请改用 `POST /push` 或换设备 key。全局 gotify 接口（`/version`、`/message`、`/stream`）已移除。
 - WebSocket 心跳：服务器 45s 发一次 ping；客户端 ping（桥每 20s）会刷新读超时（60s），
   静默失效的连接会被回收。WebSocket 默认放行所有 Origin（桥不发 Origin）。
 - 平台路由：推送消息会按设备注册时的 `platform` 字段自动路由到 APNs（iOS）或华为 Push Kit（HarmonyOS）。监控流不区分平台，所有推送都会进入统一的消息流。

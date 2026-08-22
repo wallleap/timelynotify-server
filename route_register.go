@@ -33,10 +33,12 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 	var deviceInfo DeviceInfo
 	if compat {
 		if err := c.QueryParser(&deviceInfo); err != nil {
+			logger.Warnf("[Register] query parse failed: %v", err)
 			return c.Status(400).JSON(failed(400, "request bind failed1: %v", err))
 		}
 	} else {
 		if err := c.BodyParser(&deviceInfo); err != nil {
+			logger.Warnf("[Register] body parse failed: %v", err)
 			return c.Status(400).JSON(failed(400, "request bind failed2: %v", err))
 		}
 	}
@@ -49,25 +51,28 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 		if deviceInfo.OldDeviceToken != "" {
 			deviceInfo.DeviceToken = deviceInfo.OldDeviceToken
 		} else {
+			logger.Warnf("[Register] device token is empty")
 			return c.Status(400).JSON(failed(400, "device token is empty"))
 		}
 	}
 
-	// DeviceToken length is variable, but should not be too long.
 	if len(deviceInfo.DeviceToken) > 160 {
+		logger.Warnf("[Register] device token too long: len=%d", len(deviceInfo.DeviceToken))
 		return c.Status(400).JSON(failed(400, "device token is invalid"))
 	}
 
-	// Validate platform if provided
 	platform := "ios"
 	if deviceInfo.Platform != "" {
 		platform = deviceInfo.Platform
 		if platform != "ios" && platform != "harmony" {
+			logger.Warnf("[Register] invalid platform: %s", platform)
 			return c.Status(400).JSON(failed(400, "invalid platform (must be 'ios' or 'harmony')"))
 		}
 	}
 
-	// Save device info using new API (supports platform)
+	logger.Infof("[Register] registering device: key=%s platform=%s compat=%v",
+		deviceInfo.DeviceKey, platform, compat)
+
 	dbInfo := &database.DeviceInfo{
 		Key:      deviceInfo.DeviceKey,
 		Token:    deviceInfo.DeviceToken,
@@ -76,13 +81,13 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 	
 	newKey, err := db.SaveDeviceInfo(dbInfo)
 	if err != nil {
-		logger.Errorf("device registration failed: %v", err)
+		logger.Errorf("[Register] failed: key=%s err=%v", deviceInfo.DeviceKey, err)
 		return c.Status(500).JSON(failed(500, "device registration failed: %v", err))
 	}
 	deviceInfo.DeviceKey = newKey
 
+	logger.Infof("[Register] success: key=%s platform=%s", newKey, platform)
 	return c.Status(200).JSON(data(map[string]string{
-		// compatible with old resp
 		"key":          deviceInfo.DeviceKey,
 		"device_key":   deviceInfo.DeviceKey,
 		"device_token": deviceInfo.DeviceToken,
@@ -94,12 +99,16 @@ func doRegisterCheck(c *fiber.Ctx) error {
 	deviceKey := c.Params("device_key")
 
 	if deviceKey == "" {
+		logger.Warnf("[Register] check: device key is empty")
 		return c.Status(400).JSON(failed(400, "device key is empty"))
 	}
 
+	logger.Infof("[Register] checking device: key=%s", deviceKey)
 	_, err := db.DeviceTokenByKey(deviceKey)
 	if err != nil {
+		logger.Infof("[Register] device not found: key=%s", deviceKey)
 		return c.Status(400).JSON(failed(400, "%s", err.Error()))
 	}
+	logger.Infof("[Register] device exists: key=%s", deviceKey)
 	return c.Status(200).JSON(success())
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/wallleap/hotify-bark-server/internal/gotifycompat"
 	"github.com/gofiber/fiber/v2"
 	fiberws "github.com/gofiber/websocket/v2"
+	"github.com/mritd/logger"
 )
 
 // gotifyService is the lazily-initialized gotify-compatible monitoring service.
@@ -15,18 +16,7 @@ var gotifyService *gotifycompat.Service
 
 func init() {
 	registerRoute("gotify", func(router fiber.Router) {
-		// Probe endpoint used by hotify-bridge localhost autodetect.
-		router.Get("/version", routeGotifyVersion)
-		// Read/history endpoint used by hotify-bridge backfill & watermark init.
-		router.Get("/message", routeGotifyMessage)
-		// Delete endpoints: single id or wipe-all, token-authenticated like
-		// gotify's DELETE /message and DELETE /message/:id.
-		router.Delete("/message", routeGotifyMessageDeleteAll)
-		router.Delete("/message/:id", routeGotifyMessageDeleteOne)
-		// Live subscription endpoint used by hotify-bridge /stream monitoring.
-		router.Get("/stream", routeGotifyStreamUpgrade, fiberws.New(routeGotifyStream))
-
-		// --- Device-scoped variants -------------------------------------
+		// --- Device-scoped gotify-compatible monitoring endpoints -----
 		// Each supports per-device history & live stream. Authentication still
 		// uses the global client token (device isolation is not a credential).
 		// Static path segments take priority over the legacy push_compat
@@ -54,20 +44,13 @@ func gotifyToken(c *fiber.Ctx) string {
 	return ""
 }
 
-// routeGotifyVersion serves {"version":"..."} like gotify's GET /version.
-func routeGotifyVersion(c *fiber.Ctx) error {
-	if gotifyService == nil {
-		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
-	}
-	return c.JSON(map[string]string{"version": gotifyService.Version()})
-}
-
-// routeGotifyDeviceVersion serves the same version for a device-scoped probe.
-// Like the global /version, it requires no token.
+// routeGotifyDeviceVersion serves the version for a device-scoped probe.
 func routeGotifyDeviceVersion(c *fiber.Ctx) error {
 	if gotifyService == nil {
+		logger.Warnf("[Gotify] service not initialized for version check")
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
+	logger.Infof("[Gotify] version probe: device_key=%s", c.Params("device_key"))
 	return c.JSON(map[string]string{"version": gotifyService.Version()})
 }
 
@@ -106,95 +89,49 @@ func messageResponse(messages []gotifycompat.Message, q messageQuery) map[string
 	}
 }
 
-// routeGotifyMessage serves {"messages":[...]} newest-first, like gotify's
-// GET /message. Supports limit (default 100, max 200) and since (ID < since).
-func routeGotifyMessage(c *fiber.Ctx) error {
-	if gotifyService == nil {
-		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
-	}
-	if !gotifyService.ValidateToken(gotifyToken(c)) {
-		return c.Status(401).JSON(failed(401, "unauthorized"))
-	}
-
-	q := parseMessageQuery(c)
-
-	messages, err := gotifyService.Messages(q.limit, q.since)
-	if err != nil {
-		return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
-	}
-	return c.JSON(messageResponse(messages, q))
-}
-
 // routeGotifyDeviceMessage is the device-scoped GET /message: only messages of
 // the device_key in the URL path are returned.
 func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 	if gotifyService == nil {
+		logger.Warnf("[Gotify] service not initialized for message query")
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
 	if !gotifyService.ValidateToken(gotifyToken(c)) {
+		logger.Warnf("[Gotify] unauthorized message query: device_key=%s", c.Params("device_key"))
 		return c.Status(401).JSON(failed(401, "unauthorized"))
 	}
 
 	q := parseMessageQuery(c)
 	device := c.Params("device_key")
+	logger.Infof("[Gotify] message query: device_key=%s limit=%d since=%d", device, q.limit, q.since)
 
 	messages, err := gotifyService.MessagesByDevice(device, q.limit, q.since)
 	if err != nil {
+		logger.Errorf("[Gotify] message query failed: device_key=%s err=%v", device, err)
 		return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
 	}
+	logger.Infof("[Gotify] message query success: device_key=%s count=%d", device, len(messages))
 	return c.JSON(messageResponse(messages, q))
-}
-
-// routeGotifyMessageDeleteAll wipes the whole message history (gotify's
-// DELETE /message), token-authenticated.
-func routeGotifyMessageDeleteAll(c *fiber.Ctx) error {
-	if gotifyService == nil {
-		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
-	}
-	if !gotifyService.ValidateToken(gotifyToken(c)) {
-		return c.Status(401).JSON(failed(401, "unauthorized"))
-	}
-	if err := gotifyService.DeleteAllMessages(); err != nil {
-		return c.Status(500).JSON(failed(500, "delete messages failed: %v", err))
-	}
-	return c.JSON(success())
-}
-
-// routeGotifyMessageDeleteOne removes a single message (gotify's
-// DELETE /message/:id); 404 when the id does not exist.
-func routeGotifyMessageDeleteOne(c *fiber.Ctx) error {
-	if gotifyService == nil {
-		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
-	}
-	if !gotifyService.ValidateToken(gotifyToken(c)) {
-		return c.Status(401).JSON(failed(401, "unauthorized"))
-	}
-	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(failed(400, "invalid message id: %v", err))
-	}
-	existed, err := gotifyService.DeleteMessage(id)
-	if err != nil {
-		return c.Status(500).JSON(failed(500, "delete message failed: %v", err))
-	}
-	if !existed {
-		return c.Status(404).JSON(failed(404, "message not found"))
-	}
-	return c.JSON(success())
 }
 
 // routeGotifyDeviceMessageDeleteAll wipes only the given device's message
 // history; other devices' messages are untouched.
 func routeGotifyDeviceMessageDeleteAll(c *fiber.Ctx) error {
 	if gotifyService == nil {
+		logger.Warnf("[Gotify] service not initialized for delete all")
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
 	if !gotifyService.ValidateToken(gotifyToken(c)) {
+		logger.Warnf("[Gotify] unauthorized delete all: device_key=%s", c.Params("device_key"))
 		return c.Status(401).JSON(failed(401, "unauthorized"))
 	}
-	if err := gotifyService.DeleteAllMessagesByDevice(c.Params("device_key")); err != nil {
+	device := c.Params("device_key")
+	logger.Infof("[Gotify] delete all messages: device_key=%s", device)
+	if err := gotifyService.DeleteAllMessagesByDevice(device); err != nil {
+		logger.Errorf("[Gotify] delete all failed: device_key=%s err=%v", device, err)
 		return c.Status(500).JSON(failed(500, "delete messages failed: %v", err))
 	}
+	logger.Infof("[Gotify] delete all success: device_key=%s", device)
 	return c.JSON(success())
 }
 
@@ -203,74 +140,71 @@ func routeGotifyDeviceMessageDeleteAll(c *fiber.Ctx) error {
 // device.
 func routeGotifyDeviceMessageDeleteOne(c *fiber.Ctx) error {
 	if gotifyService == nil {
+		logger.Warnf("[Gotify] service not initialized for delete one")
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
 	if !gotifyService.ValidateToken(gotifyToken(c)) {
+		logger.Warnf("[Gotify] unauthorized delete one: device_key=%s", c.Params("device_key"))
 		return c.Status(401).JSON(failed(401, "unauthorized"))
 	}
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
+		logger.Warnf("[Gotify] invalid message id: %s", c.Params("id"))
 		return c.Status(400).JSON(failed(400, "invalid message id: %v", err))
 	}
-	existed, err := gotifyService.DeleteMessageByDevice(c.Params("device_key"), id)
+	device := c.Params("device_key")
+	logger.Infof("[Gotify] delete message: device_key=%s id=%d", device, id)
+	existed, err := gotifyService.DeleteMessageByDevice(device, id)
 	if err != nil {
+		logger.Errorf("[Gotify] delete message failed: device_key=%s id=%d err=%v", device, id, err)
 		return c.Status(500).JSON(failed(500, "delete message failed: %v", err))
 	}
 	if !existed {
+		logger.Infof("[Gotify] message not found: device_key=%s id=%d", device, id)
 		return c.Status(404).JSON(failed(404, "message not found"))
 	}
+	logger.Infof("[Gotify] delete message success: device_key=%s id=%d", device, id)
 	return c.JSON(success())
 }
 
-// routeGotifyStreamUpgrade validates the token before the WebSocket upgrade so
-// that unauthorized clients get a 401 handshake response (gotify behaviour).
-func routeGotifyStreamUpgrade(c *fiber.Ctx) error {
-	return routeGotifyStreamUpgradeDevice(c, "")
-}
-
-// routeGotifyDeviceStreamUpgrade is the device-scoped /stream upgrade: the
-// device_key is stashed for the stream handler, then the same token validation
-// as the global endpoint applies.
+// routeGotifyDeviceStreamUpgrade validates the token before the WebSocket
+// upgrade so that unauthorized clients get a 401 handshake response.
+// The device_key is stashed for the stream handler.
 func routeGotifyDeviceStreamUpgrade(c *fiber.Ctx) error {
-	return routeGotifyStreamUpgradeDevice(c, c.Params("device_key"))
-}
-
-func routeGotifyStreamUpgradeDevice(c *fiber.Ctx, device string) error {
 	if gotifyService == nil {
+		logger.Warnf("[Gotify] service not initialized for stream")
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
 	if !fiberws.IsWebSocketUpgrade(c) {
+		logger.Warnf("[Gotify] websocket upgrade expected but got: %s", c.Path())
 		return c.Status(400).JSON(failed(400, "websocket upgrade expected"))
 	}
 	token := gotifyToken(c)
 	if !gotifyService.ValidateToken(token) {
+		logger.Warnf("[Gotify] unauthorized stream: device_key=%s", c.Params("device_key"))
 		return c.Status(401).JSON(failed(401, "unauthorized"))
 	}
-	if device != "" {
-		c.Locals("device_key", device)
-	}
+	deviceKey := c.Params("device_key")
+	logger.Infof("[Gotify] stream connected: device_key=%s", deviceKey)
+	c.Locals("device_key", deviceKey)
 	return c.Next()
 }
 
 // routeGotifyStream serves the live WebSocket stream of bare gotify message
 // JSON frames (no event/socketConnected envelope), matching what the
-// hotify-bridge subscriber expects. When a device_key is present in the fiber
-// locals, only that device's messages are streamed. It replies to client pings
-// and reaches out with server pings so idle NAT'd connections survive. All
-// writes happen in this goroutine (no concurrent writes on the connection).
+// hotify-bridge subscriber expects. Only messages for the registered device
+// are streamed. It replies to client pings and reaches out with server pings
+// so idle NAT'd connections survive. All writes happen in this goroutine
+// (no concurrent writes on the connection).
 func routeGotifyStream(conn *fiberws.Conn) {
 	device := ""
 	if v := conn.Locals("device_key"); v != nil {
 		device, _ = v.(string)
 	}
-	var ch <-chan gotifycompat.Message
-	var unsubscribe func()
-	if device != "" {
-		ch, unsubscribe = gotifyService.SubscribeByDevice(device)
-	} else {
-		ch, unsubscribe = gotifyService.Subscribe()
-	}
+	ch, unsubscribe := gotifyService.SubscribeByDevice(device)
 	defer unsubscribe()
+	defer logger.Infof("[Gotify] stream disconnected: device_key=%s subscribers=%d",
+		device, gotifyService.SubscriberCount()-1)
 	if barkMetrics != nil {
 		barkMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
 		defer barkMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
@@ -278,9 +212,6 @@ func routeGotifyStream(conn *fiberws.Conn) {
 
 	conn.SetReadLimit(512)
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	// hotify-bridge sends a WebSocket ping every 20s; each received ping/pong
-	// refreshes the read deadline so the connection survives indefinitely,
-	// while a truly silent dead peer is reaped after 60s.
 	conn.SetPingHandler(func(appData string) error {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return conn.WriteControl(fiberws.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
@@ -294,6 +225,7 @@ func routeGotifyStream(conn *fiberws.Conn) {
 		defer close(done)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				logger.Infof("[Gotify] stream read error: device_key=%s err=%v", device, err)
 				return
 			}
 		}
@@ -308,6 +240,7 @@ func routeGotifyStream(conn *fiberws.Conn) {
 		case <-ping.C:
 			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := conn.WriteControl(fiberws.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				logger.Infof("[Gotify] stream ping error: device_key=%s err=%v", device, err)
 				return
 			}
 		case m, ok := <-ch:
@@ -316,6 +249,7 @@ func routeGotifyStream(conn *fiberws.Conn) {
 			}
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(m); err != nil {
+				logger.Infof("[Gotify] stream write error: device_key=%s err=%v", device, err)
 				return
 			}
 		}

@@ -388,16 +388,16 @@ curl "http://127.0.0.1:18080/ynJ5Ft4atkMkWeo2PAvFhF/%E6%A0%87%E9%A2%98/%E6%AD%A3
 
 ### 客户端 token（Gotify 兼容接口）
 
-`/message`、`/stream`（及设备级变体）用客户端 token 鉴权，未带或错误时返回 `401`。三种携带方式按优先级从高到低：
+设备级 `/:device_key/message`、`/:device_key/stream` 用客户端 token 鉴权，未带或错误时返回 `401`。三种携带方式按优先级从高到低：
 
 1. query 参数：`?token=<clientToken>`
 2. 请求头：`X-Gotify-Key: <clientToken>`
 3. 请求头：`Authorization: Bearer <clientToken>`
 
 ```sh
-curl "http://127.0.0.1:18080/message?token=<clientToken>"
-curl -H "X-Gotify-Key: <clientToken>" "http://127.0.0.1:18080/message"
-curl -H "Authorization: Bearer <clientToken>" "http://127.0.0.1:18080/message"
+curl "http://127.0.0.1:18080/<device_key>/message?token=<clientToken>"
+curl -H "X-Gotify-Key: <clientToken>" "http://127.0.0.1:18080/<device_key>/message"
+curl -H "Authorization: Bearer <clientToken>" "http://127.0.0.1:18080/<device_key>/message"
 ```
 
 同时携带时按上述顺序取第一个非空值。token 生成方式见 [TOKENS.md](TOKENS.md)。
@@ -411,10 +411,10 @@ curl -H "Authorization: Bearer <clientToken>" "http://127.0.0.1:18080/message"
 
 | 分类 | 路径 |
 |---|---|
-| 全局 | `/ping`、`/register`、`/healthz`、`/version`、`/info`、`/message`、`/stream` |
+| 全局 | `/ping`、`/register`、`/healthz`、`/info` |
 | 设备级 | `/:device_key/version`、`/:device_key/message`、`/:device_key/message/:id`（DELETE）、`/:device_key/stream` |
 
-其中 `/message`、`/stream` 及设备级变体仍需客户端 token 鉴权（见上）；`/info` 无凭据返回基础信息、带有效 Basic Auth 才返回设备数。根路径 `/` 因 BasicAuth 中间件挂载于 `Use("/+")`（不匹配零段根路径），无凭据亦返回 `"ok"`。
+其中设备级 `/:device_key/message`、`/:device_key/stream` 仍需客户端 token 鉴权（见上）；`/info` 无凭据返回基础信息、带有效 Basic Auth 才返回设备数。根路径 `/` 因 BasicAuth 中间件挂载于 `Use("/+")`（不匹配零段根路径），无凭据亦返回 `"ok"`。
 
 **非白名单路径**（Basic Auth 开启时必须携带凭据）：`/push`、`/:device_key`（V1 兼容推送）、`/:device_key/:body` 等路径形态、`/mcp*`、`/metrics`。
 - 建议在 `Authorization` 头中携带，避免 query 明文泄露；推送参数仍可经 query 传递。
@@ -427,7 +427,7 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 
 ### 两者的优先级/关系
 
-- **Basic Auth 是包级的"能否进入"门禁**（按路径白名单放行，`/message`、`/stream`、`/info` 等豁免）；**客户端 token 是接口内的"你是谁"鉴权**（放行后才校验 token）。
+- **Basic Auth 是包级的"能否进入"门禁**（按路径白名单放行，`/:device_key/message`、`/:device_key/stream`、`/info` 等豁免）；**客户端 token 是接口内的"你是谁"鉴权**（放行后才校验 token）。
 - 同一请求可同时带两种头：`Authorization: Basic <...>` 通过 Basic Auth 门禁，`Authorization: Bearer <...>` 或 query 提供客户端 token——两者互不覆盖。
 - Basic Auth 白名单见 [README](../README.md)。
 
@@ -441,13 +441,10 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 | POST | `/register` | 无 | 设备注册（body：`device_key`(可选)/`device_token`/`platform`(可选, `ios` 或 `harmony`, 默认 `ios`)），返回 `device_key`。详见 [TUTORIAL.md](TUTORIAL.md) |
 | GET | `/register` | 无 | 设备注册（兼容旧 query 参数：`key`/`devicetoken`） |
 | GET | `/register/:device_key` | 无 | 校验 device_key 是否存在 |
-| GET | `/version` | 无 | Gotify 兼容探测，返回 `{"version":...}` |
-| GET | `/message` | 客户端 token | Gotify 兼容历史消息查询，参数 `limit`(默认100/上限200)、`since`(id < since) |
-| DELETE | `/message` / `/message/:id` | 客户端 token | Gotify 兼容删除历史 |
-| GET | `/stream` | 客户端 token | Gotify 兼容 WebSocket 订阅 |
-| GET/DELETE | `/:device_key/message`、`/:device_key/message/:id` | 客户端 token | 单设备历史查询/删除，参数同全局 |
-| GET | `/:device_key/stream` | 客户端 token | 单设备实时订阅 |
-| GET | `/:device_key/version` | 无 | 单设备探测 |
+| GET | `/:device_key/version` | 无 | 设备级探测 |
+| GET | `/:device_key/message` | 客户端 token | Gotify 兼容历史消息查询，参数 `limit`(默认100/上限200)、`since`(id < since) |
+| DELETE | `/:device_key/message` / `/:device_key/message/:id` | 客户端 token | Gotify 兼容设备级删除历史 |
+| GET | `/:device_key/stream` | 客户端 token | Gotify 兼容设备级 WebSocket 订阅 |
 | ALL | `/mcp` / `/mcp/:device_key` | 无 | MCP 接口（streamable HTTP），供 AI 代理调用 `notify` 推送 |
 
 Gotify 兼容与 MCP 接口的详细参数与示例见 [GOTIFY_COMPAT.md](GOTIFY_COMPAT.md) 与 [MCP.md](MCP.md)。

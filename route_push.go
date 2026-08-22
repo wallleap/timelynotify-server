@@ -83,28 +83,27 @@ func SetMaxBatchPushCount(count int) {
 	maxBatchPushCount = count
 }
 func routeDoPush(c *fiber.Ctx) error {
-	// Get content-type
 	contentType := utils.ToLower(utils.UnsafeString(c.Request().Header.ContentType()))
 	contentType = utils.ParseVendorSpecificContentType(contentType)
-	// Json request uses the API V2
+
+	logger.Infof("[Push] received: method=%s path=%s content-type=%s",
+		c.Method(), c.Path(), contentType)
+
 	if strings.HasPrefix(contentType, "application/json") {
 		return routeDoPushV2(c)
-	} else {
-		return routeDoPushV1(c)
 	}
+	return routeDoPushV1(c)
 }
 
 func routeDoPushV1(c *fiber.Ctx) error {
+	logger.Infof("[Push] V1 request: path=%s", c.Path())
 
 	params := make(map[string]interface{})
 	visitor := func(key, value []byte) {
 		params[strings.ToLower(string(key))] = string(value)
 	}
-	// parse query args (medium priority)
 	c.Request().URI().QueryArgs().VisitAll(visitor)
-	// parse post args
 	c.Request().PostArgs().VisitAll(visitor)
-	// parse multipartForm values
 	form, err := c.Request().MultipartForm()
 	if err == nil {
 		for key, val := range form.Value {
@@ -113,35 +112,43 @@ func routeDoPushV1(c *fiber.Ctx) error {
 			}
 		}
 	}
-	// parse url path (highest priority)
 	pathParams, err := extractUrlPathParams(c)
 	if err != nil {
+		logger.Warnf("[Push] V1 path parse failed: %v", err)
 		return c.Status(400).JSON(failed(400, "url path parse failed: %v", err))
 	}
 	for key, val := range pathParams {
 		params[key] = val
 	}
 
+	deviceKey := ""
+	if dk, ok := params["device_key"]; ok {
+		deviceKey = fmt.Sprint(dk)
+	}
+	logger.Infof("[Push] V1 params parsed: device_key=%s", deviceKey)
+
 	code, err := push(params)
 	if err != nil {
+		logger.Errorf("[Push] V1 failed: device_key=%s code=%d err=%v", deviceKey, code, err)
 		return c.Status(code).JSON(failed(code, "%s", err.Error()))
-	} else {
-		return c.JSON(success())
 	}
+	logger.Infof("[Push] V1 success: device_key=%s code=%d", deviceKey, code)
+	return c.JSON(success())
 }
 func routeDoPushV2(c *fiber.Ctx) error {
+	logger.Infof("[Push] V2 request: path=%s", c.Path())
+
 	params := make(map[string]interface{})
-	// parse body
 	if err := c.BodyParser(&params); err != nil && err != fiber.ErrUnprocessableEntity {
+		logger.Warnf("[Push] V2 body parse failed: %v", err)
 		return c.Status(400).JSON(failed(400, "request bind failed: %v", err))
 	}
-	// parse query args (medium priority)
 	c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
 		params[strings.ToLower(string(key))] = string(value)
 	})
-	// parse url path (highest priority)
 	pathParams, err := extractUrlPathParams(c)
 	if err != nil {
+		logger.Warnf("[Push] V2 path parse failed: %v", err)
 		return c.Status(400).JSON(failed(400, "url path parse failed: %v", err))
 	}
 	for key, val := range pathParams {
@@ -149,7 +156,6 @@ func routeDoPushV2(c *fiber.Ctx) error {
 	}
 
 	var deviceKeys []string
-	// Get the device_keys array from params
 	if keys, ok := params["device_keys"]; ok {
 		switch keys := keys.(type) {
 		case string:
@@ -167,52 +173,61 @@ func routeDoPushV2(c *fiber.Ctx) error {
 	count := len(deviceKeys)
 
 	if count == 0 {
-		// Single push
+		deviceKey := ""
+		if dk, ok := params["device_key"]; ok {
+			deviceKey = fmt.Sprint(dk)
+		}
+		logger.Infof("[Push] V2 single push: device_key=%s", deviceKey)
 		code, err := push(params)
 		if err != nil {
+			logger.Errorf("[Push] V2 single failed: device_key=%s code=%d err=%v", deviceKey, code, err)
 			return c.Status(code).JSON(failed(code, "%s", err.Error()))
-		} else {
-			return c.JSON(success())
 		}
-	} else {
-		// Batch push
-		if count > maxBatchPushCount && maxBatchPushCount != -1 {
-			return c.Status(400).JSON(failed(400, "batch push count exceeds the maximum limit: %d", maxBatchPushCount))
-		}
-
-		var wg sync.WaitGroup
-		result := make([]map[string]interface{}, count)
-		var mu sync.Mutex
-
-		for i := 0; i < count; i++ {
-			// Copy params
-			newParams := make(map[string]interface{})
-			for k, v := range params {
-				newParams[k] = v
-			}
-			newParams["device_key"] = deviceKeys[i]
-
-			wg.Add(1)
-			go func(i int, newParams map[string]interface{}) {
-				defer wg.Done()
-
-				// Push
-				code, err := push(newParams)
-
-				// Save result
-				mu.Lock()
-				result[i] = make(map[string]interface{})
-				if err != nil {
-					result[i]["message"] = err.Error()
-				}
-				result[i]["code"] = code
-				result[i]["device_key"] = deviceKeys[i]
-				mu.Unlock()
-			}(i, newParams)
-		}
-		wg.Wait()
-		return c.JSON(data(result))
+		logger.Infof("[Push] V2 single success: device_key=%s code=%d", deviceKey, code)
+		return c.JSON(success())
 	}
+
+	logger.Infof("[Push] V2 batch push: count=%d", count)
+	if count > maxBatchPushCount && maxBatchPushCount != -1 {
+		logger.Warnf("[Push] V2 batch exceeds limit: count=%d limit=%d", count, maxBatchPushCount)
+		return c.Status(400).JSON(failed(400, "batch push count exceeds the maximum limit: %d", maxBatchPushCount))
+	}
+
+	var wg sync.WaitGroup
+	result := make([]map[string]interface{}, count)
+	var mu sync.Mutex
+
+	for i := 0; i < count; i++ {
+		newParams := make(map[string]interface{})
+		for k, v := range params {
+			newParams[k] = v
+		}
+		newParams["device_key"] = deviceKeys[i]
+
+		wg.Add(1)
+		go func(i int, newParams map[string]interface{}) {
+			defer wg.Done()
+
+			code, err := push(newParams)
+
+			mu.Lock()
+			result[i] = make(map[string]interface{})
+			if err != nil {
+				result[i]["message"] = err.Error()
+				logger.Errorf("[Push] V2 batch item failed: device_key=%s code=%d err=%v",
+					deviceKeys[i], code, err)
+			} else {
+				logger.Infof("[Push] V2 batch item success: device_key=%s code=%d",
+					deviceKeys[i], code)
+			}
+			result[i]["code"] = code
+			result[i]["device_key"] = deviceKeys[i]
+			mu.Unlock()
+		}(i, newParams)
+	}
+	wg.Wait()
+	logger.Infof("[Push] V2 batch completed: total=%d", count)
+	return c.JSON(data(result))
 }
 
 func extractUrlPathParams(c *fiber.Ctx) (map[string]interface{}, error) {
@@ -246,7 +261,6 @@ func extractUrlPathParams(c *fiber.Ctx) (map[string]interface{}, error) {
 }
 
 func push(params map[string]interface{}) (int, error) {
-	// default value
 	msg := apns.PushMessage{
 		Body:      "",
 		Sound:     "1107",
@@ -269,14 +283,12 @@ func push(params map[string]interface{}) (int, error) {
 			case "body":
 				msg.Body = val
 			case "sound":
-				// Compatible with old parameters
 				if strings.HasSuffix(val, ".caf") {
 					msg.Sound = val
 				} else {
 					msg.Sound = val + ".caf"
 				}
 			case "platform":
-				// Allow specifying platform in request (e.g. "harmony" or "ios")
 				msg.ExtParams["_platform"] = val
 			default:
 				msg.ExtParams[strings.ToLower(string(key))] = val
@@ -291,43 +303,44 @@ func push(params map[string]interface{}) (int, error) {
 	}
 
 	if msg.DeviceKey == "" {
+		logger.Errorf("[Push] device key is empty")
 		return 400, fmt.Errorf("device key is empty")
 	}
 
 	if msg.IsEmptyAlert() {
-		// For encrypted push notifications, a Body is required; otherwise, APNs will discard the notification
 		msg.Body = "Empty Message"
 	}
 
-	// Get device info (includes platform)
+	logger.Infof("[Push] device lookup: device_key=%s", msg.DeviceKey)
 	deviceInfo, err := db.DeviceInfoByKey(msg.DeviceKey)
 	if err != nil {
+		logger.Errorf("[Push] device not found: device_key=%s err=%v", msg.DeviceKey, err)
 		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
 
-	// Determine platform: use explicitly provided one, or fall back to stored one
 	platform := deviceInfo.Platform
 	if explicitPlatform, ok := msg.ExtParams["_platform"].(string); ok && explicitPlatform != "" {
 		platform = explicitPlatform
+		logger.Infof("[Push] platform override: device_key=%s explicit=%s stored=%s",
+			msg.DeviceKey, explicitPlatform, deviceInfo.Platform)
+	} else {
+		logger.Infof("[Push] platform resolved: device_key=%s platform=%s", msg.DeviceKey, platform)
 	}
 
-	// Ensure harmony client is initialized if needed
 	if platform == "harmony" {
 		initHarmony()
 	}
 
 	msg.DeviceToken = deviceInfo.Token
 
-	// Mirror the push into the gotify-compatible monitoring stream (hotify-bridge).
-	// Published once the device token is resolved, independent of iOS delivery.
 	gotifyPublish(&msg)
 
-	// Route to the appropriate push channel based on platform
 	if platform == "harmony" {
+		logger.Infof("[Push] routing to HarmonyOS: device_key=%s", msg.DeviceKey)
 		return pushToHarmony(deviceInfo, &msg)
 	}
-	
-	// Default: iOS (APNs)
+
+	logger.Infof("[Push] routing to APNs: device_key=%s", msg.DeviceKey)
 	return pushToAPNs(deviceInfo, &msg)
 }
 
@@ -335,37 +348,39 @@ func push(params map[string]interface{}) (int, error) {
 func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	code, err := pushAPNs(msg)
 
-	// Invalid token, delete it from database.
 	if code == 410 || (code == 400 && strings.Contains(err.Error(), "BadDeviceToken")) {
+		logger.Warnf("[Push] APNs invalid token, clearing: device_key=%s code=%d", msg.DeviceKey, code)
 		_, _ = db.SaveDeviceTokenByKey(msg.DeviceKey, "")
 	}
 	if err != nil {
+		logger.Errorf("[Push] APNs failed: device_key=%s code=%d err=%v", msg.DeviceKey, code, err)
 		return 500, fmt.Errorf("push failed: %v", err)
 	}
+	logger.Infof("[Push] APNs success: device_key=%s code=%d", msg.DeviceKey, code)
 	return 200, nil
 }
 
 // pushToHarmony sends notification via Huawei Push Kit
 func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	if harmonyClient == nil {
+		logger.Errorf("[Push] HarmonyOS client not initialized: device_key=%s", msg.DeviceKey)
 		return 500, fmt.Errorf("harmony push client is not initialized")
 	}
 
-	// Extract click_action level if present
 	clickAction := "launch"
 	if level, ok := msg.ExtParams["level"].(string); ok {
-		// Map bark levels to Huawei click actions
 		switch strings.ToLower(level) {
 		case "critical", "timeSensitive":
-			clickAction = "launch" // Full-screen notification
+			clickAction = "launch"
 		case "active":
-			clickAction = "banner" // Banner notification
+			clickAction = "banner"
 		default:
-			clickAction = "page" // Normal notification
+			clickAction = "page"
 		}
 	}
 
-	// Extract data payload
+	logger.Infof("[Push] HarmonyOS push: device_key=%s click_action=%s", msg.DeviceKey, clickAction)
+
 	var dataStr string
 	if customData, ok := msg.ExtParams["data"].(string); ok {
 		dataStr = customData
@@ -380,12 +395,16 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 	)
 
 	if err != nil {
-		// Handle token expiry - clear the token if it's invalid
-		if hmsCode == 80200001 { // invalid token
+		if hmsCode == 80200001 {
+			logger.Warnf("[Push] HarmonyOS invalid token, clearing: device_key=%s hmsCode=%d",
+				msg.DeviceKey, hmsCode)
 			_, _ = db.SaveDeviceTokenByKey(msg.DeviceKey, "")
 		}
+		logger.Errorf("[Push] HarmonyOS failed: device_key=%s hmsCode=%d err=%v",
+			msg.DeviceKey, hmsCode, err)
 		return 500, fmt.Errorf("harmony push failed (code %d): %v", hmsCode, err)
 	}
 
+	logger.Infof("[Push] HarmonyOS success: device_key=%s hmsCode=%d", msg.DeviceKey, hmsCode)
 	return 200, nil
 }

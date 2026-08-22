@@ -24,12 +24,6 @@ func newHub() *Hub {
 	return &Hub{subs: make(map[uint64]subscriber)}
 }
 
-// Subscribe registers a client that receives every message and returns its
-// message channel together with an unsubscribe function.
-func (h *Hub) Subscribe() (<-chan Message, func()) {
-	return h.SubscribeByDevice("")
-}
-
 // SubscribeByDevice registers a client filtered to a single device (device==""
 // disables the filter). After Unsubscribe is called, the channel is closed and
 // must no longer be used for sending.

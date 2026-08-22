@@ -18,7 +18,7 @@ Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/ba
 
 - 独立的 Go module、二进制名与 Docker 镜像名（`wallleap/hotify-bark-server`）
 - 原生 HarmonyOS 推送支持（华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由）
-- 内置 [Gotify 兼容接口](./docs/GOTIFY_COMPAT.md)（`/version`、`/message`、`/stream` 等），供 hotify-bridge 监测 bark 推送或操作消息
+- 内置 [Gotify 兼容接口](./docs/GOTIFY_COMPAT.md)（设备级 `/<device_key>/version`、`/<device_key>/message`、`/<device_key>/stream` 等），供 hotify-bridge 监测 bark 推送或操作消息
 - 内置 [MCP](./docs/MCP.md) 接口（`/mcp`、`/mcp/:device_key`），AI 代理可直接调用推送
 - 可选 Basic Auth、MySQL TLS、gotify 客户端 token 等
 
@@ -166,7 +166,7 @@ systemctl enable --now hotify-bark-server
 
 > **默认无鉴权**：未配置 Basic Auth 时，`/push`、`/register`、`/mcp*` 与 `/:device_key` 对全网开放（启动日志会给出醒目警告）。**公网部署务必**：
 
-1. 开启 Basic Auth：`BARK_SERVER_BASIC_AUTH_USER` / `BARK_SERVER_BASIC_AUTH_PASSWORD`（`/push`、`/mcp*`、`/:device_key` 受保护；白名单路径 `/ping /register /healthz /version /info /message /stream` 仍开放——其中 `/message` `/stream` 走 gotify token 鉴权，`/info` 无凭据返回基础信息、带有效 Basic Auth 才返回设备数）。
+1. 开启 Basic Auth：`BARK_SERVER_BASIC_AUTH_USER` / `BARK_SERVER_BASIC_AUTH_PASSWORD`（`/push`、`/mcp*`、`/:device_key` 受保护；白名单路径 `/ping /register /healthz /info` + 设备级 `/:device_key/version /:device_key/message /:device_key/stream` 仍开放——其中 `/:device_key/message` `/:device_key/stream` 走 gotify token 鉴权，`/info` 无凭据返回基础信息、带有效 Basic Auth 才返回设备数）。
 2. 配置限流：`BARK_SERVER_RATE_LIMIT_IP=10`（每秒每 IP 最多 10 次）可缓解 CC / 刷注册。推送端点 `/push`、`/:device_key` 默认不限流（避免误伤正常推送），确需限制时再加 `BARK_SERVER_RATE_LIMIT_PUSH=true`。
 3. 建议前置 **HTTPS 反向代理**（如 Caddy / Nginx），并限制其仅转发到 `:8080`。
 4. 数据目录 `/data` 收紧为服务运行用户可读写。

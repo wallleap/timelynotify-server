@@ -145,23 +145,11 @@ func (s *Service) Version() string {
 	return s.version
 }
 
-// Messages returns up to limit stored messages newest-first, optionally
-// filtered to ID < since.
-func (s *Service) Messages(limit int, since uint64) ([]Message, error) {
-	return s.store.Recent(limit, since)
-}
-
 // MessagesByDevice returns up to limit stored messages for a single device
 // newest-first, optionally filtered to ID < since. device=="" returns all
-// messages (same as Messages).
+// messages (same as the removed Messages).
 func (s *Service) MessagesByDevice(device string, limit int, since uint64) ([]Message, error) {
 	return s.store.RecentByDevice(device, limit, since)
-}
-
-// DeleteMessage removes the message with the given ID; the bool reports
-// whether it existed (used to answer 404 like gotify does).
-func (s *Service) DeleteMessage(id uint64) (bool, error) {
-	return s.store.Delete(id)
 }
 
 // DeleteMessageByDevice removes the message only when it belongs to device;
@@ -170,25 +158,14 @@ func (s *Service) DeleteMessageByDevice(device string, id uint64) (bool, error) 
 	return s.store.DeleteByDevice(device, id)
 }
 
-// DeleteAllMessages removes every stored message.
-func (s *Service) DeleteAllMessages() error {
-	return s.store.DeleteAll()
-}
-
 // DeleteAllMessagesByDevice removes every stored message belonging to device
 // (device=="" removes everything).
 func (s *Service) DeleteAllMessagesByDevice(device string) error {
 	return s.store.DeleteAllByDevice(device)
 }
 
-// Subscribe registers a live message consumer. The returned channel is closed
-// by the returned unsubscribe func.
-func (s *Service) Subscribe() (<-chan Message, func()) {
-	return s.hub.Subscribe()
-}
-
 // SubscribeByDevice registers a live consumer filtered to a single device
-// (device=="" disables the filter, same as Subscribe).
+// (device=="" disables the filter, same as the removed Subscribe).
 func (s *Service) SubscribeByDevice(device string) (<-chan Message, func()) {
 	return s.hub.SubscribeByDevice(device)
 }

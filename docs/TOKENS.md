@@ -37,7 +37,7 @@ curl -X POST http://<host>:18080/register \
 
 ## 4. client token（gotify 兼容接口令牌）
 
-- **是什么**：访问 Gotify 兼容监控接口（`/message`、`/stream`）的令牌。所有推送（包括 iOS 和 HarmonyOS）都会进入这个监控流。
+- **是什么**：访问 Gotify 兼容监控接口（设备级 `/:device_key/message`、`/:device_key/stream`）的令牌。所有推送（包括 iOS 和 HarmonyOS）都会进入这个监控流。
 - **谁生成**：两种方式：
   1. **推荐——预置**：启动时设置环境变量 `BARK_SERVER_GOTIFY_CLIENT_TOKEN` 或参数 `--gotify-client-token`。服务端**只保存 SHA-256 哈希**，不落明文；token 本身由你指定（比如用 `openssl rand -base64 32` 生成）。
   2. **自动生成**：未设置时，服务端用 `crypto/rand` 生成 32 字节随机数并做 base64url 编码（43 字符），**首次启动时在日志打印一次**（`internal/gotifycompat/token.go`、`service.go`）。明文会以 0600 权限存进 `<data>/gotify.db` 以保持重启稳定。
@@ -63,12 +63,12 @@ curl -X POST http://<host>:18080/register \
 | device_token | APNs 投递目标 | iOS 系统 | `/register` 上报，推送时由服务端内部使用 |
 | harmony_token | 华为 Push Kit 投递目标 | HarmonyOS 系统 | `/register` 上报，推送时由服务端内部使用 |
 | device_key | 定位设备、推送凭证 | 用户或服务端（shortuuid） | `/push`、`/:device_key` 兼容推送、`/mcp`、`/mcp/:device_key` |
-| client token | 监控接口访问 | 用户预置或服务端自动生成 | `/message`、`/stream`（`/version` 无需认证） |
+| client token | 监控接口访问 | 用户预置或服务端自动生成 | 设备级 `/:device_key/message`、`/:device_key/stream`（`/:device_key/version` 无需认证） |
 | 服务账号密钥 | 华为 API 鉴权 | 华为开发者联盟 | 服务端内部使用，用于签名 JWT |
 
 补充说明（均属上游设计，非本 fork 引入）：
 
-- **MCP 接口与 push 等价**，以 device_key 为凭证，无独立认证。开启 Basic Auth（`--user`/`--password`）后 `/mcp`、`/push` 会被保护（白名单只放行 `/ping`、`/register`、`/healthz`、`/version`、`/message`、`/stream`、`/info`；其中 `/info` 无凭据返回基础信息，带有效 Basic Auth 才返回设备数）。
+- **MCP 接口与 push 等价**，以 device_key 为凭证，无独立认证。开启 Basic Auth（`--user`/`--password`）后 `/mcp`、`/push` 会被保护（白名单只放行 `/ping`、`/register`、`/healthz`、`/info` + 设备级 `/:device_key/version`、`/:device_key/message`、`/:device_key/stream`；其中设备级监控接口走 gotify token 鉴权，`/info` 无凭据返回基础信息，带有效 Basic Auth 才返回设备数）。
 - **Basic Auth 配置注意**：`--user` 有值而 `--password` 为空时，除白名单外所有请求都会被拒绝。
 - 服务端内置了 Bark App 的 APNs p8 私钥（`apns/apns_certs.go`），这是"服务端代发"架构——任何运行本服务端的人都能以 Bark App 名义发推送，请只在你信任的主机上部署。
 - 服务端鸿蒙推送使用的华为服务账号密钥需要用户自行配置（`harmony/harmony_certs.go`），不会随代码仓库分发。

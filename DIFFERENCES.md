@@ -9,9 +9,9 @@
 | 功能 | 说明 | 文档 |
 |---|---|---|
 | 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；`level` 字段映射到华为 `click_action` | [API_V2.md](docs/API_V2.md) |
-| Gotify 兼容监控及其它消息相关接口 | `GET /version`、`GET /message`、`GET /stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
+| Gotify 兼容监控及其它消息相关接口 | 设备级 `GET /<device_key>/version`、`GET /<device_key>/message`、`GET /<device_key>/stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | MCP 推送 | `POST /mcp`、`POST /mcp/:device_key`，AI 代理可通过 Model Context Protocol 直接发推送 | [MCP.md](docs/MCP.md) |
-| Basic Auth | 可选 `--user/--password`，`/ping` `/register` `/healthz` `/version` `/info` `/message` `/stream` 白名单（`/info` 无凭据显示基础信息，带凭据才含设备数） | |
+| Basic Auth | 可选 `--user/--password`，`/ping` `/register` `/healthz` `/info` 全局白名单 + 设备级 `/:device_key/version` `/:device_key/message` `/:device_key/stream` 白名单（`/info` 无凭据显示基础信息，带凭据才含设备数） | |
 | MySQL TLS | `--mysql-tls` 及配套 `mysql-ca`/`mysql-client-cert`/`mysql-client-key`/`mysql-tls-name`/`mysql-tls-skip-verify` | |
 | Gotify 客户端 token | `--gotify-client-token`，SHA-256 哈希持久化，自动生成并打印一次 | |
 | Gotify 消息上限 | `--gotify-max-messages`，配置监控消息保留条数（默认 `1000`） | |

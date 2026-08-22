@@ -1,6 +1,6 @@
 // Package authfree decides which request paths are exempt from Basic Auth
 // because they carry their own authentication (a gotify client token on
-// /message & /stream) or need none (probe endpoints).
+// device-level /message & /stream) or need none (probe endpoints).
 package authfree
 
 import (
@@ -8,15 +8,14 @@ import (
 	"strings"
 )
 
-// Routers are paths exempt from Basic Auth; they carry their own
-// authentication (gotify token on /message & /stream, none needed on the
-// probe endpoints, /info is public but gated to add data when authed).
-var Routers = []string{"/ping", "/register", "/healthz", "/version", "/message", "/stream", "/info"}
+// Routers are global paths exempt from Basic Auth; they need no
+// authentication (probe endpoints) or carry their own.
+var Routers = []string{"/ping", "/register", "/healthz", "/info"}
 
 // Suffixes are single device-key-scoped path suffixes exempt from Basic Auth,
-// matching /:device_key/<suffix> or /:device_key/message/:id. They carry the
-// same per-route authentication as their global counterparts (gotify token /
-// none). ":id" is a placeholder matching one non-empty segment.
+// matching /:device_key/<suffix> or /:device_key/message/:id. They carry their
+// own authentication (gotify client token on /message & /stream, none on
+// /version). ":id" is a placeholder matching one non-empty segment.
 var Suffixes = []string{"/version", "/message", "/stream", "/message/:id"}
 
 // IsAuthFreePath reports whether p is (or is under) a Basic-Auth whitelisted

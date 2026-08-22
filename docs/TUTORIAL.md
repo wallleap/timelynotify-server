@@ -96,7 +96,7 @@ iOS `device_token` 由 **iOS 系统**生成、Bark App 注册 APNs 时获得。
 
 ## 5. client token 填到哪里
 
-client token 是 gotify 兼容监控、操作接口（`/message`、`/stream`）的访问凭证，**强烈推荐预置**。
+client token 是 gotify 兼容监控、操作接口（设备级 `/:device_key/message`、`/:device_key/stream`）的访问凭证，**强烈推荐预置**。
 
 **服务端侧（预置）**——二选一，效果相同：
 
@@ -162,6 +162,6 @@ curl -X DELETE -H "X-Gotify-Key: <clientToken>" "http://<host>:18080/message"  #
   2. 确认注册时指定了 `platform: harmony`
   3. 查看服务日志是否有 `HarmonyOS push client initialized`
   4. 确认设备 token 有效（失效时会返回错误）
-- **桥连不上 `/message`、`/stream`（401）**：`gotify_token` 与 `BARK_SERVER_GOTIFY_CLIENT_TOKEN` 不一致，或用了自动生成 token 但服务重启过（重启后自动 token 不变，若删过 `gotify.db` 才变）。
+- **桥连不上 `/:device_key/message`、`/:device_key/stream`（401）**：`gotify_token` 与 `BARK_SERVER_GOTIFY_CLIENT_TOKEN` 不一致，或用了自动生成 token 但服务重启过（重启后自动 token 不变，若删过 `gotify.db` 才变）。
 - **找不到自动生成的 client token**：Docker 部署可在**首次启动**时用 `docker logs -f hotify-bark-server` 看到（该行仅打印一次）；或预置一个（推荐）；或停服删除 `<data>/gotify.db` 重新生成（会同时清空监控历史）。
-- **`/messageevil` 之类路径被拒绝（418）**：属正常——Basic Auth 白名单只放行精确路径 `/message` 及其子路径。
+- **`/messageevil` 之类路径被拒绝（418）**：属正常——Basic Auth 白名单只放行精确路径及其子路径，裸前缀不匹配。

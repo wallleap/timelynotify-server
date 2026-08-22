@@ -16,26 +16,23 @@ func TestIsAuthFreePath(t *testing.T) {
 		{name: "ping exact", urlPrefix: "/", p: "/ping", want: true},
 		{name: "register exact", urlPrefix: "/", p: "/register", want: true},
 		{name: "healthz exact", urlPrefix: "/", p: "/healthz", want: true},
-		{name: "message exact", urlPrefix: "/", p: "/message", want: true},
-		{name: "stream exact", urlPrefix: "/", p: "/stream", want: true},
-		{name: "version exact", urlPrefix: "/", p: "/version", want: true},
 		{name: "info exact", urlPrefix: "/", p: "/info", want: true},
 		// Global subpaths (all whitelisted parents, incl. the real
 		// /register/:device_key route).
-		{name: "message subpath", urlPrefix: "/", p: "/message/12", want: true},
 		{name: "register device subpath", urlPrefix: "/", p: "/register/abc123", want: true},
 		{name: "ping subpath", urlPrefix: "/", p: "/ping/x", want: true},
 		{name: "healthz subpath", urlPrefix: "/", p: "/healthz/x", want: true},
-		{name: "version subpath", urlPrefix: "/", p: "/version/x", want: true},
-		{name: "stream subpath", urlPrefix: "/", p: "/stream/x", want: true},
 		{name: "info subpath", urlPrefix: "/", p: "/info/extra", want: true},
 		// Trailing slash on a whitelisted parent.
 		{name: "info trailing slash", urlPrefix: "/", p: "/info/", want: true},
-		{name: "message trailing slash", urlPrefix: "/", p: "/message/", want: true},
 		// Lookalike must NOT match (bare-prefix safety, all parents).
 		{name: "pingevil rejected", urlPrefix: "/", p: "/pingevil", want: false},
 		{name: "registerevil rejected", urlPrefix: "/", p: "/registerevil", want: false},
 		{name: "healthevil rejected", urlPrefix: "/", p: "/healthevil", want: false},
+		// Removed global gotify routes are no longer whitelisted.
+		{name: "global message rejected", urlPrefix: "/", p: "/message", want: false},
+		{name: "global stream rejected", urlPrefix: "/", p: "/stream", want: false},
+		{name: "global version rejected", urlPrefix: "/", p: "/version", want: false},
 		{name: "messageevil rejected", urlPrefix: "/", p: "/messageevil", want: false},
 		{name: "streamevil rejected", urlPrefix: "/", p: "/streamevil", want: false},
 		{name: "versionevil rejected", urlPrefix: "/", p: "/versionevil", want: false},

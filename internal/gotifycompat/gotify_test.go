@@ -118,9 +118,9 @@ func TestPublishAndMessagesOrdering(t *testing.T) {
 			t.Fatalf("Publish: %v", err)
 		}
 	}
-	msgs, err := svc.Messages(100, 0)
+	msgs, err := svc.MessagesByDevice("", 100, 0)
 	if err != nil {
-		t.Fatalf("Messages: %v", err)
+		t.Fatalf("MessagesByDevice: %v", err)
 	}
 	if len(msgs) != 5 {
 		t.Fatalf("want 5 messages, got %d", len(msgs))
@@ -147,7 +147,7 @@ func TestMessagesSinceFilter(t *testing.T) {
 		}
 	}
 	// since=7 → only ids 1..6
-	msgs, err := svc.Messages(100, 7)
+	msgs, err := svc.MessagesByDevice("", 100, 7)
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -164,11 +164,11 @@ func TestMessagesLimit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		_ = svc.Publish("t", "body", 0, nil)
 	}
-	msgs, _ := svc.Messages(3, 0)
+	msgs, _ := svc.MessagesByDevice("", 3, 0)
 	if len(msgs) != 3 {
 		t.Fatalf("want 3 messages, got %d", len(msgs))
 	}
-	msgs, _ = svc.Messages(0, 0)
+	msgs, _ = svc.MessagesByDevice("", 0, 0)
 	if len(msgs) != 0 {
 		t.Fatalf("want 0 messages for limit=0, got %d", len(msgs))
 	}
@@ -182,7 +182,7 @@ func TestPruningRetainsNewest(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		_ = svc.Publish("t", "body", 0, nil)
 	}
-	msgs, _ := svc.Messages(100, 0)
+	msgs, _ := svc.MessagesByDevice("", 100, 0)
 	if len(msgs) != 3 {
 		t.Fatalf("want 3 retained, got %d", len(msgs))
 	}
@@ -216,7 +216,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if !svc2.ValidateToken(tok) {
 		t.Fatal("persisted token must still validate after reopen")
 	}
-	msgs, _ := svc2.Messages(100, 0)
+	msgs, _ := svc2.MessagesByDevice("", 100, 0)
 	if len(msgs) != 3 {
 		t.Fatalf("want 3 persisted messages, got %d", len(msgs))
 	}
@@ -225,7 +225,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	}
 	// ids keep increasing after reopen
 	_ = svc2.Publish("t", "body", 0, nil)
-	msgs, _ = svc2.Messages(1, 0)
+	msgs, _ = svc2.MessagesByDevice("", 1, 0)
 	if msgs[0].ID != 4 {
 		t.Fatalf("id after reopen should be 4, got %d", msgs[0].ID)
 	}
@@ -290,7 +290,7 @@ func TestOperatorOverrideClearsStaleAutoToken(t *testing.T) {
 
 func TestHubFanout(t *testing.T) {
 	svc := buildTestService(t, "")
-	ch, unsubscribe := svc.Subscribe()
+	ch, unsubscribe := svc.SubscribeByDevice("")
 	defer unsubscribe()
 
 	_ = svc.Publish("t", "body", 1, map[string]interface{}{"a": 1})
@@ -323,9 +323,9 @@ func TestSubscriberCount(t *testing.T) {
 	if n := svc.SubscriberCount(); n != 0 {
 		t.Fatalf("want 0 subscribers, got %d", n)
 	}
-	ch1, un1 := svc.Subscribe()
+	ch1, un1 := svc.SubscribeByDevice("")
 	defer un1()
-	ch2, un2 := svc.Subscribe()
+	ch2, un2 := svc.SubscribeByDevice("")
 	defer un2()
 	if n := svc.SubscriberCount(); n != 2 {
 		t.Fatalf("want 2 subscribers, got %d", n)
@@ -345,7 +345,7 @@ func TestSubscriberCount(t *testing.T) {
 func TestMessageJSONWireShape(t *testing.T) {
 	svc := buildTestService(t, "")
 	_ = svc.Publish("title", "body", 2, map[string]interface{}{"device_key": "k", "subtitle": "sub"})
-	msgs, _ := svc.Messages(1, 0)
+	msgs, _ := svc.MessagesByDevice("", 1, 0)
 	b, err := json.Marshal(msgs[0])
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -404,7 +404,7 @@ func TestDeleteMessage(t *testing.T) {
 	svc := buildTestService(t, "")
 	publishN(t, svc, 3)
 
-	ok, err := svc.DeleteMessage(2)
+	ok, err := svc.DeleteMessageByDevice("", 2)
 	if err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestDeleteMessage(t *testing.T) {
 		t.Fatal("message 2 should exist")
 	}
 
-	msgs, _ := svc.Messages(100, 0)
+	msgs, _ := svc.MessagesByDevice("", 100, 0)
 	if len(msgs) != 2 {
 		t.Fatalf("want 2 messages after delete, got %d", len(msgs))
 	}
@@ -420,7 +420,7 @@ func TestDeleteMessage(t *testing.T) {
 		t.Fatalf("unexpected remaining messages: %+v", msgs)
 	}
 
-	ok, err = svc.DeleteMessage(99)
+	ok, err = svc.DeleteMessageByDevice("", 99)
 	if err != nil {
 		t.Fatalf("DeleteMessage(99): %v", err)
 	}
@@ -432,7 +432,7 @@ func TestDeleteMessage(t *testing.T) {
 	if err := svc.Publish("t", "b", 0, nil); err != nil {
 		t.Fatalf("Publish after delete: %v", err)
 	}
-	msgs, _ = svc.Messages(1, 0)
+	msgs, _ = svc.MessagesByDevice("", 1, 0)
 	if msgs[0].ID != 4 {
 		t.Fatalf("id after delete should be 4, got %d", msgs[0].ID)
 	}
@@ -444,10 +444,10 @@ func TestDeleteAllMessages(t *testing.T) {
 	svc := buildTestService(t, "")
 	publishN(t, svc, 3)
 
-	if err := svc.DeleteAllMessages(); err != nil {
+	if err := svc.DeleteAllMessagesByDevice(""); err != nil {
 		t.Fatalf("DeleteAllMessages: %v", err)
 	}
-	msgs, _ := svc.Messages(100, 0)
+	msgs, _ := svc.MessagesByDevice("", 100, 0)
 	if len(msgs) != 0 {
 		t.Fatalf("want 0 messages after DeleteAll, got %d", len(msgs))
 	}
@@ -455,7 +455,7 @@ func TestDeleteAllMessages(t *testing.T) {
 	if err := svc.Publish("t", "b", 0, nil); err != nil {
 		t.Fatalf("Publish after DeleteAll: %v", err)
 	}
-	msgs, _ = svc.Messages(1, 0)
+	msgs, _ = svc.MessagesByDevice("", 1, 0)
 	if msgs[0].ID != 4 {
 		t.Fatalf("id after DeleteAll should continue from 4, got %d", msgs[0].ID)
 	}
@@ -688,22 +688,22 @@ func TestDeleteOnMemoryStore(t *testing.T) {
 	svc := buildMemoryFallbackService(t)
 	publishN(t, svc, 3)
 
-	ok, err := svc.DeleteMessage(2)
+	ok, err := svc.DeleteMessageByDevice("", 2)
 	if err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
 	if !ok {
 		t.Fatal("message 2 should exist")
 	}
-	msgs, _ := svc.Messages(100, 0)
+	msgs, _ := svc.MessagesByDevice("", 100, 0)
 	if len(msgs) != 2 || msgs[0].ID != 3 || msgs[1].ID != 1 {
 		t.Fatalf("unexpected remaining after single delete: %+v", msgs)
 	}
 
-	if err := svc.DeleteAllMessages(); err != nil {
+	if err := svc.DeleteAllMessagesByDevice(""); err != nil {
 		t.Fatalf("DeleteAllMessages: %v", err)
 	}
-	msgs, _ = svc.Messages(100, 0)
+	msgs, _ = svc.MessagesByDevice("", 100, 0)
 	if len(msgs) != 0 {
 		t.Fatalf("want 0 after DeleteAll on memory store, got %d", len(msgs))
 	}
@@ -780,7 +780,7 @@ func TestPublishPersistenceError(t *testing.T) {
 	if err := svc.store.(*bboltStore).Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	ch, unsubscribe := svc.Subscribe()
+	ch, unsubscribe := svc.SubscribeByDevice("")
 	defer unsubscribe()
 	if err := svc.Publish("t", "b", 0, nil); err == nil {
 		t.Fatal("Publish on a closed store must return an error")
@@ -800,7 +800,7 @@ func TestMessagesNegativeLimit(t *testing.T) {
 		buildMemoryFallbackService(t),
 	} {
 		publishN(t, svc, 3)
-		msgs, err := svc.Messages(-1, 0)
+		msgs, err := svc.MessagesByDevice("", -1, 0)
 		if err != nil {
 			t.Fatalf("Messages(-1): %v", err)
 		}
@@ -814,13 +814,13 @@ func TestMessagesNegativeLimit(t *testing.T) {
 // sequence is untouched by wiping an already-empty history.
 func TestDeleteAllWhenEmpty(t *testing.T) {
 	svc := buildTestService(t, "")
-	if err := svc.DeleteAllMessages(); err != nil {
+	if err := svc.DeleteAllMessagesByDevice(""); err != nil {
 		t.Fatalf("DeleteAllMessages on empty store: %v", err)
 	}
 	if err := svc.Publish("t", "b", 0, nil); err != nil {
 		t.Fatalf("Publish after empty DeleteAll: %v", err)
 	}
-	msgs, _ := svc.Messages(1, 0)
+	msgs, _ := svc.MessagesByDevice("", 1, 0)
 	if len(msgs) != 1 || msgs[0].ID != 1 {
 		t.Fatalf("first id after empty DeleteAll should be 1, got %+v", msgs)
 	}

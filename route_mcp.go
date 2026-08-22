@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mritd/logger"
 )
 
 type contextKey string
@@ -73,10 +74,10 @@ func setupSpecificMCPServer() *server.StreamableHTTPServer {
 func notifyHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args, ok := request.Params.Arguments.(map[string]any)
 	if !ok {
+		logger.Warnf("[MCP] invalid arguments format")
 		return mcp.NewToolResultError("Invalid arguments format"), nil
 	}
 
-	// Resolve device_key: tool args > context (from URL)
 	var deviceKey string
 	if val, ok := args["device_key"]; ok {
 		if tmpDeviceKey, ok := val.(string); ok {
@@ -89,14 +90,20 @@ func notifyHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallT
 		}
 	}
 	if len(deviceKey) == 0 {
+		logger.Warnf("[MCP] device_key is required")
 		return mcp.NewToolResultError("device_key is required"), nil
 	}
 
 	args["device_key"] = deviceKey
+	logger.Infof("[MCP] notify: device_key=%s", deviceKey)
+
 	code, err := push(args)
 	if err != nil {
+		logger.Errorf("[MCP] notify failed: device_key=%s code=%d err=%v", deviceKey, code, err)
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to send notification: %v (code %d)", err, code)), nil
 	}
+
+	logger.Infof("[MCP] notify success: device_key=%s code=%d", deviceKey, code)
 	return mcp.NewToolResultText("Notification sent successfully"), nil
 }
 
