@@ -1,14 +1,14 @@
-# AGENTS.md — hotify-bark-server
+# AGENTS.md — timelynotify-server
 
 Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs) **和 HarmonyOS (华为 Push Kit)** 推送服务，扩展了 Gotify 兼容监控接口（推送也会进入监控流）和 MCP 接口。不向上游回同步；二进制/镜像/module 均已独立命名。改动清单见 `docs/DIFFERENCES.md`。
 
 ## Project
 - 入口：根目录 `package main`（`main.go`），urfave/cli v2 定义参数（`BARK_SERVER_*` 环境变量），fiber.New 构建应用。
-- 模块路径：`github.com/wallleap/hotify-bark-server`，go.mod `go 1.25.5`（README 里的 "Go 1.18+" 已过时，以 go.mod 为准）。
+- 模块路径：`github.com/wallleap/timelynotify-server`，go.mod `go 1.25.5`（README 里的 "Go 1.18+" 已过时，以 go.mod 为准）。
 - 推送链路：HTTP → `routeDoPush`（JSON→V2 / 其他→V1）→ `push()` → `db.DeviceInfoByKey` → 按 `platform` 分发 → `gotifyPublish`（监控流）→ `pushToAPNs` / `pushToHarmony`。HarmonyOS 推送需 `harmony/harmony_certs.go` 配置华为服务账号密钥。
 
 ## Commands
-- 构建：`go build ./...`；本地二进制 `bin/build`（输出 `dist/hotify-bark-server`）；全平台交叉编译 `task`，单平台如 `task linux_amd64`。
+- 构建：`go build ./...`；本地二进制 `bin/build`（输出 `dist/timelynotify-server`）；全平台交叉编译 `task`，单平台如 `task linux_amd64`。
 - 运行：`go run . --data ./dev-data`（默认监听 `0.0.0.0:8080`，数据目录默认 `/data` 需可写）；docker compose：`bin/up` / `bin/down`（本地镜像）。
 - 测试：`go test ./internal/gotifycompat/` ✅ 可直接跑；`go test ./harmony/...` ✅ 鸿蒙推送单元测试；`go test ./database/...` ✅ 数据库层测试；**`go test ./...` 会失败**——`push_test.go` 的 `TestMain` 要求手填有效 `deviceToken` 常量（当前为空会 panic）。
 - 集成测试：`./scripts/test_integration.sh` 一键运行鸿蒙推送完整集成测试（需 Python3 + 已配置 `harmony_certs.go`）。
@@ -23,7 +23,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 - `internal/gotifycompat/` — Gotify 兼容监控：`service.go`（Init/ValidateToken/Publish）、`store.go`（bbolt 持久化，不可用则内存降级）、`hub.go`（WebSocket 扇出）、`token.go`（token 生成/hash）。数据在 `<data>/gotify.db`。
 - 根目录路由文件（`package main`，各自 `init()` 中 `registerRoute` 注册）：`route_push.go`（V1/V2、批量推送）、`route_register.go`、`route_gotify.go`（设备级 `/<device_key>/version`、`/<device_key>/message`、`/<device_key>/stream`）、`route_mcp.go`（`/mcp`、`/mcp/:device_key`）、`route_misc.go`、`route_auth.go`（可选 Basic Auth）、`route_rate_limit.go`（限流中间件与初始化）。
 - 限流：`internal/ratelimit/`（token bucket，按 key 即 IP，并发安全）；`route_rate_limit.go` 的 `setupRateLimits(ip, burst, push)` 在 `runServer` 里从 flags 构建 `ipLimiter`。`/register`、`/mcp*` **始终限流**；推送端点 `/push`、`/:device_key` 默认不限流，仅当 `--rate-limit-push` 开启。**中间件必须按单路由挂（`route_rate_limit.go` 的 `rateLimitMiddleware` / `rateLimitPushMiddleware`），不能 group 级 `Use`**——所有路由共享一个 Fiber group，group Use 会把限流器泄漏到无关路径。
-- 可观测性：`internal/metrics/`（Prometheus，`GET /metrics` 暴露 HTTP 请求指标 + 活跃 `/stream` 连接数 + Go/进程指标，`barkMetrics.Middleware()` 全量埋点）；`internal/logging/`（`--log-level`/`--log-format` 解析，接入 `mritd/logger`）。监控中间件可 group 级 `Use`（测量是全局预期，与限流不同）。
+- 可观测性：`internal/metrics/`（Prometheus，`GET /metrics` 暴露 HTTP 请求指标 + 活跃 `/stream` 连接数 + Go/进程指标，`tnMetrics.Middleware()` 全量埋点）；`internal/logging/`（`--log-level`/`--log-format` 解析，接入 `mritd/logger`）。监控中间件可 group 级 `Use`（测量是全局预期，与限流不同）。
 - 认证模型：`/push`、`/:device_key` 兼容推送、`/mcp*` **无独立认证**（device_key 即凭证）；设备级 `/:device_key/message`、`/:device_key/stream` 用 gotify client token（恒定时间比较）；设备级 `/:device_key/version` 无需认证；Basic Auth 开启时白名单经 `isAuthFreePath` 按**精确路径/子路径**匹配放行——勿改回裸前缀匹配，否则 `/messageevil` 类路径会被放行（曾为此出过 auth bypass）。全局 gotify 接口（`/version`、`/message`、`/stream`）已移除，仅保留设备级路径。
 - `router.go` — 路由注册表（`registerRoute` / `registerRouteWithWeight`，按 weight 降序）+ 通用响应 `CommonResp`（`success()` / `failed()` / `data()`）+ fiber logger/recover 中间件。
 - `deploy/helm-chart/` — Kubernetes 部署：PVC 持久化 `/data`（bbolt + gotify.db，`persistence` 值控制）；MySQL DSN 经 Secret 注入 `BARK_SERVER_DSN`（`mysql-secret.yaml`），不以明文 args 传递。

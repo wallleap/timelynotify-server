@@ -31,10 +31,10 @@ func init() {
 
 		// metrics exposes Prometheus metrics (HTTP counters + Go/process).
 		router.Get("/metrics", func(c *fiber.Ctx) error {
-			if barkMetrics == nil {
+			if tnMetrics == nil {
 				return c.Status(503).JSON(failed(503, "metrics not initialized"))
 			}
-			return barkMetrics.Handler()(c)
+			return tnMetrics.Handler()(c)
 		})
 
 		// info func returns information about the server version

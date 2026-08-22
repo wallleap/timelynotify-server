@@ -92,7 +92,7 @@ echo "==> 已创建 tag: $NEW_TAG"
 if [ "$PUSH" = "1" ]; then
   git push origin "$BRANCH"
   git push origin "$NEW_TAG"
-  echo "==> 已推送 $BRANCH 与 ${NEW_TAG}，CI 将构建镜像: https://github.com/wallleap/hotify-bark-server/actions"
+  echo "==> 已推送 $BRANCH 与 ${NEW_TAG}，CI 将构建镜像: https://github.com/wallleap/timelynotify-server/actions"
 else
   echo "==> 未推送（--no-push），手动推送: git push origin ${NEW_TAG}"
 fi

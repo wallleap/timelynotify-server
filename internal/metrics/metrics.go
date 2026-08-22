@@ -1,4 +1,4 @@
-// Package metrics exposes a small Prometheus registry for the bark server:
+// Package metrics exposes a small Prometheus registry for the server:
 // standard Go/process collectors plus HTTP request counters and latency. A
 // data-exporter registers request instrumentation middleware and a /metrics
 // handler on the fiber router.
@@ -31,14 +31,14 @@ func New() *Registry {
 	)
 
 	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "hotify_bark",
+		Namespace: "timelynotify",
 		Name:      "http_requests_total",
 		Help:      "Total HTTP requests by method and status.",
 	}, []string{"method", "status"})
 	reg.MustRegister(requests)
 
 	activeStreams := prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: "hotify_bark",
+		Namespace: "timelynotify",
 		Name:      "active_streams",
 		Help:      "Number of active gotify-compatible /stream WebSocket connections.",
 	})

@@ -1,6 +1,6 @@
-# Hotify-Bark Server
+# TimelyNotify Server
 
-Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了以下能力：
+TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了以下能力：
 
 - **原生双平台推送**：同时支持 iOS（APNs）和 HarmonyOS（华为 Push Kit）原生推送，统一 API 自动路由
 - **Gotify 兼容监控**：每一条推送都会进入 Gotify 风格的监控流，供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 消费
@@ -16,7 +16,7 @@ Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/ba
 
 ## 与原项目的区别
 
-- 独立的 Go module、二进制名与 Docker 镜像名（`wallleap/hotify-bark-server`）
+- 独立的 Go module、二进制名与 Docker 镜像名（`wallleap/timelynotify-server`）
 - 原生 HarmonyOS 推送支持（华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由）
 - 内置 [Gotify 兼容接口](./docs/GOTIFY_COMPAT.md)（设备级 `/<device_key>/version`、`/<device_key>/message`、`/<device_key>/stream` 等），供 hotify-bridge 监测 bark 推送或操作消息
 - 内置 [MCP](./docs/MCP.md) 接口（`/mcp`、`/mcp/:device_key`），AI 代理可直接调用推送
@@ -32,23 +32,23 @@ Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/ba
 
 | 文件 | 说明 |
 |---|---|
-| `deploy/Dockerfile` | 构建镜像（二进制 `hotify-bark-server`） |
-| `deploy/docker-compose.yaml` | Docker Compose 部署（远程镜像 `wallleap/hotify-bark-server`） |
+| `deploy/Dockerfile` | 构建镜像（二进制 `timelynotify-server`） |
+| `deploy/docker-compose.yaml` | Docker Compose 部署（远程镜像 `wallleap/timelynotify-server`） |
 | `deploy/docker-compose.local.yaml` | Docker Compose 部署（本地构建镜像，`bin/up` 默认使用） |
-| `deploy/hotify-bark-server.service` | systemd 服务 |
+| `deploy/timelynotify-server.service` | systemd 服务 |
 | `deploy/entrypoint.sh` | 容器入口，设置时区 |
 | `deploy/helm-chart/` | Kubernetes Helm Chart |
 
 ### Docker
 
 ```sh
-docker run -dt --name hotify-bark-server --restart unless-stopped \
+docker run -dt --name timelynotify-server --restart unless-stopped \
   -p 18080:8080 \
   -v `pwd`/bark-data:/data \
   -e BARK_SERVER_GOTIFY_CLIENT_TOKEN="your-gotify-client-token" \
   -e BARK_SERVER_BASIC_AUTH_USER="admin" \
   -e BARK_SERVER_BASIC_AUTH_PASSWORD="secret" \
-  wallleap/hotify-bark-server
+  wallleap/timelynotify-server
 ```
 
 > 容器以非 root 用户 `app`（uid 1000）运行，首次挂载 host 数据目录时需把属主改为该 uid，否则报 `permission denied`：
@@ -57,14 +57,14 @@ docker run -dt --name hotify-bark-server --restart unless-stopped \
 > ```
 > 用 Docker 命名卷（`docker volume create` + `-v <volume>:/data`）可免去手动 chown。
 
-> 镜像推送到 Docker Hub（用户 `wallleap`）。如需自己的仓库，用 `docker tag wallleap/hotify-bark-server yourname/hotify-bark-server`。
+> 镜像推送到 Docker Hub（用户 `wallleap`）。如需自己的仓库，用 `docker tag wallleap/timelynotify-server yourname/timelynotify-server`。
 
 使用 docker-compose：
 
 ```sh
 # 复制本项目 deploy/docker-compose.yaml 到任意目录
-mkdir hotify-bark-server && cd hotify-bark-server
-curl -sL https://raw.githubusercontent.com/wallleap/hotify-bark-server/master/deploy/docker-compose.yaml -o docker-compose.yaml
+mkdir timelynotify-server && cd timelynotify-server
+curl -sL https://raw.githubusercontent.com/wallleap/timelynotify-server/master/deploy/docker-compose.yaml -o docker-compose.yaml
 # 提前赋权避免容器权限报错
 sudo chown -R 1000:1000 ./data
 # 后台启动
@@ -91,8 +91,8 @@ bin/release --dry-run  # 只打印将要执行的动作，不实际修改
 bin/release --no-push  # 更新 CHANGELOG + 打 tag，但不推送（手动推）
 ```
 
-- Docker Hub：`<DOCKERHUB_USERNAME>/hotify-bark-server`
-- GHCR：`ghcr.io/<GitHub 账号>/hotify-bark-server`
+- Docker Hub：`<DOCKERHUB_USERNAME>/timelynotify-server`
+- GHCR：`ghcr.io/<GitHub 账号>/timelynotify-server`
 
 推送镜像需要配置两个 Secrets（仓库 **Settings → Secrets and variables → Actions**）：
 
@@ -107,13 +107,13 @@ GHCR 推送使用仓库自带 `GITHUB_TOKEN`，需在 **Settings → Actions →
 
 ```sh
 # 1. 安装二进制
-install -m 755 hotify-bark-server /usr/local/bin/hotify-bark-server
+install -m 755 timelynotify-server /usr/local/bin/timelynotify-server
 
 # 2. 复制服务文件
-cp deploy/hotify-bark-server.service /etc/systemd/system/
+cp deploy/timelynotify-server.service /etc/systemd/system/
 
 # 3. 创建参数环境文件（修改后的参数放在这里）
-cat > /etc/hotify-bark-server.env <<'EOF'
+cat > /etc/timelynotify-server.env <<'EOF'
 BARK_SERVER_GOTIFY_CLIENT_TOKEN=your-gotify-client-token
 BARK_SERVER_BASIC_AUTH_USER=admin
 BARK_SERVER_BASIC_AUTH_PASSWORD=secret
@@ -121,17 +121,17 @@ EOF
 
 # 4. 启动
 systemctl daemon-reload
-systemctl enable --now hotify-bark-server
+systemctl enable --now timelynotify-server
 ```
 
 ### 直接运行
 
-1. 自行编译或从 [releases](https://github.com/wallleap/hotify-bark-server/releases) 下载预编译二进制
-2. 添加执行权限：`chmod +x hotify-bark-server`
+1. 自行编译或从 [releases](https://github.com/wallleap/timelynotify-server/releases) 下载预编译二进制
+2. 添加执行权限：`chmod +x timelynotify-server`
 3. 启动（含修改后的参数）：
 
 ```sh
-./hotify-bark-server --addr 0.0.0.0:8080 --data ./bark-data \
+./timelynotify-server --addr 0.0.0.0:8080 --data ./bark-data \
   --gotify-client-token your-gotify-client-token \
   --user admin --password secret
 ```
@@ -160,7 +160,7 @@ systemctl enable --now hotify-bark-server
 | `--log-format` / `BARK_SERVER_LOG_FORMAT` | 日志格式 `console|json`，默认 `console` |
 | `--unix-socket`、`--url-prefix`、`--cert`/`--key` | 监听方式 / 前缀 / TLS |
 
-完整参数见 `./hotify-bark-server --help`。
+完整参数见 `./timelynotify-server --help`。
 
 ### 安全建议（公网部署必备）
 
@@ -219,13 +219,13 @@ PLATFORM=linux/amd64,linux/arm64 bin/publish   # 指定架构
 以 `-dsn=user:pass@tcp(mysql_host)/bark` 启动即可使用 MySQL：
 
 ```sh
-./hotify-bark-server --dsn "user:pass@tcp(mysql_host)/bark"
+./timelynotify-server --dsn "user:pass@tcp(mysql_host)/bark"
 ```
 
 开启 TLS：
 
 ```sh
-./hotify-bark-server \
+./timelynotify-server \
   --dsn "user:pass@tcp(mysql_host)/bark" \
   --mysql-tls \
   --mysql-tls-name custom \

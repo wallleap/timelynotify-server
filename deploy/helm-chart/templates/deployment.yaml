@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "hotify-bark-server.fullname" . }}
+  name: {{ include "timelynotify-server.fullname" . }}
   labels:
-    {{- include "hotify-bark-server.labels" . | nindent 4 }}
+    {{- include "timelynotify-server.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "hotify-bark-server.selectorLabels" . | nindent 6 }}
+      {{- include "timelynotify-server.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -18,13 +18,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "hotify-bark-server.selectorLabels" . | nindent 8 }}
+        {{- include "timelynotify-server.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "hotify-bark-server.serviceAccountName" . }}
+      serviceAccountName: {{ include "timelynotify-server.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -42,7 +42,7 @@ spec:
             - name: BARK_SERVER_DSN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "hotify-bark-server.fullname" . }}-mysql
+                  name: {{ include "timelynotify-server.fullname" . }}-mysql
                   key: dsn
           {{- end }}
           ports:
@@ -63,7 +63,7 @@ spec:
               path: /ping
               port: http
           {{- if .Values.extra_database.enabled }}
-          command: ["/usr/local/bin/hotify-bark-server"]
+          command: ["/usr/local/bin/timelynotify-server"]
           {{- end}}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -75,7 +75,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "hotify-bark-server.fullname" . }}-data
+            claimName: {{ include "timelynotify-server.fullname" . }}-data
       {{- end }}
       {{- with .Values.affinity }}
       affinity:

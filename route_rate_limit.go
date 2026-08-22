@@ -4,7 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mritd/logger"
 
-	"github.com/wallleap/hotify-bark-server/internal/ratelimit"
+	"github.com/wallleap/timelynotify-server/internal/ratelimit"
 )
 
 // ipLimiter is the configured per-IP limiter; nil means rate limiting disabled.

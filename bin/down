@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 停止并移除 docker compose 的 hotify-bark-server
+# 停止并移除 docker compose 的 timelynotify-server
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

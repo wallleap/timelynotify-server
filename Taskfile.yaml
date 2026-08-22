@@ -28,7 +28,7 @@ tasks:
     cmds:
       - |
         GOOS={{.GOOS}} GOARCH={{.GOARCH}} GOARM={{.GOARM}} GOMIPS={{.GOMIPS}} GOAMD64={{.GOAMD64}} \
-        go build -trimpath -o dist/hotify-bark-server_{{.TASK}} -ldflags \
+        go build -trimpath -o dist/timelynotify-server_{{.TASK}} -ldflags \
         "-w -s -X 'main.version={{.BUILD_VERSION}}' -X 'main.buildDate={{.BUILD_DATE}}' -X 'main.commitID={{.COMMIT_ID}}'"
   linux_386:
     cmds:
@@ -228,8 +228,8 @@ tasks:
         }        
   docker:
     cmds:
-      - docker build --build-arg GOPROXY={{.GOPROXY}} --build-arg ALPINE_MIRROR={{.ALPINE_MIRROR}} -t wallleap/hotify-bark-server:{{.BUILD_VERSION}} -f deploy/Dockerfile .
-      - docker tag wallleap/hotify-bark-server:{{.BUILD_VERSION}} wallleap/hotify-bark-server
+      - docker build --build-arg GOPROXY={{.GOPROXY}} --build-arg ALPINE_MIRROR={{.ALPINE_MIRROR}} -t wallleap/timelynotify-server:{{.BUILD_VERSION}} -f deploy/Dockerfile .
+      - docker tag wallleap/timelynotify-server:{{.BUILD_VERSION}} wallleap/timelynotify-server
   docker-buildx:
     vars:
       PLATFORM: linux/amd64,linux/arm/v7,linux/arm64
@@ -238,7 +238,7 @@ tasks:
       - defer: docker rm -f dind
       - docker exec -w /bark-server -it dind docker login
       - docker exec -w /bark-server -it dind docker buildx create --name builder --driver docker-container --bootstrap --use
-      - docker exec -w /bark-server -it dind docker buildx build --platform {{.PLATFORM}} --build-arg GOPROXY={{.GOPROXY}} --build-arg ALPINE_MIRROR={{.ALPINE_MIRROR}} -t wallleap/hotify-bark-server:{{.BUILD_VERSION}} -f deploy/Dockerfile --push .
+      - docker exec -w /bark-server -it dind docker buildx build --platform {{.PLATFORM}} --build-arg GOPROXY={{.GOPROXY}} --build-arg ALPINE_MIRROR={{.ALPINE_MIRROR}} -t wallleap/timelynotify-server:{{.BUILD_VERSION}} -f deploy/Dockerfile --push .
   default:
     cmds:
       - task: clean

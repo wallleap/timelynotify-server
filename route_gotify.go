@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wallleap/hotify-bark-server/internal/gotifycompat"
+	"github.com/wallleap/timelynotify-server/internal/gotifycompat"
 	"github.com/gofiber/fiber/v2"
 	fiberws "github.com/gofiber/websocket/v2"
 	"github.com/mritd/logger"
@@ -205,9 +205,9 @@ func routeGotifyStream(conn *fiberws.Conn) {
 	defer unsubscribe()
 	defer logger.Infof("[Gotify] stream disconnected: device_key=%s subscribers=%d",
 		device, gotifyService.SubscriberCount()-1)
-	if barkMetrics != nil {
-		barkMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
-		defer barkMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
+	if tnMetrics != nil {
+		tnMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
+		defer tnMetrics.SetActiveStreams(float64(gotifyService.SubscriberCount()))
 	}
 
 	conn.SetReadLimit(512)

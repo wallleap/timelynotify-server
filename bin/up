@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docker compose 部署 hotify-bark-server
+# docker compose 部署 timelynotify-server
 # 默认使用本地构建镜像 (deploy/docker-compose.local.yaml)，如需远程镜像:
 #   COMPOSE_FILE=deploy/docker-compose.yaml bin/up
 set -euo pipefail

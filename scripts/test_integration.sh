@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# Hotify-Bark-Server 鸿蒙推送集成测试脚本
+# TimelyNotify-Server 鸿蒙推送集成测试脚本
 # 模拟完整的鸿蒙设备注册和推送流程，验证端到端功能
 #==============================================================================
 set -e
@@ -49,7 +49,7 @@ cleanup() {
     echo ""
     echo_banner "清理环境"
     pkill -f "mock_huawei.py" 2>/dev/null || true
-    pkill -f "hotify-bark-server" 2>/dev/null || true
+    pkill -f "timelynotify-server" 2>/dev/null || true
     sleep 1
     rm -rf "$DATA_DIR"
     echo "已清理"
@@ -68,7 +68,7 @@ if ! command -v go &> /dev/null; then
 fi
 
 echo "Building..."
-if go build -o dist/hotify-bark-server . 2>&1; then
+if go build -o dist/timelynotify-server . 2>&1; then
     log_pass "项目编译成功"
 else
     log_fail "项目编译失败"
@@ -99,11 +99,11 @@ fi
 #==============================================================================
 echo_banner "Step 2: 启动 Bark Server"
 
-pkill -f "hotify-bark-server" 2>/dev/null || true
+pkill -f "timelynotify-server" 2>/dev/null || true
 sleep 0.5
 
 BARK_SERVER_HARMONY_MOCK_URL="http://localhost:${MOCK_PORT}" \
-./dist/hotify-bark-server \
+./dist/timelynotify-server \
   --addr ":${SERVER_PORT}" \
   --data "$DATA_DIR" \
   --rate-limit-ip=0 \
@@ -209,7 +209,7 @@ PUSH_RESP=$(curl -s -X POST ${BARK_URL}/push \
     -d '{
         "device_key": "harmony-test-001",
         "title": "鸿蒙测试通知",
-        "body": "这是一条来自 Hotify-Bark-Server 的鸿蒙推送测试消息"
+        "body": "这是一条来自 TimelyNotify-Server 的鸿蒙推送测试消息"
     }')
 echo "请求: POST /push"
 echo "响应: $PUSH_RESP"

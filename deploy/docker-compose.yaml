@@ -1,7 +1,7 @@
 services:
-  hotify-bark-server:
-    image: wallleap/hotify-bark-server
-    container_name: hotify-bark-server
+  timelynotify-server:
+    image: wallleap/timelynotify-server
+    container_name: timelynotify-server
     restart: always
     volumes:
       # 首次使用 host 目录挂载时，需先执行 sudo chown -R 1000:1000 ./deploy/data

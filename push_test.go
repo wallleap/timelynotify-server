@@ -13,8 +13,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/wallleap/hotify-bark-server/apns"
-	"github.com/wallleap/hotify-bark-server/database"
+	"github.com/wallleap/timelynotify-server/apns"
+	"github.com/wallleap/timelynotify-server/database"
 )
 
 // Before running the tests, a valid deviceToken must be set. Otherwise, the tests will fail.

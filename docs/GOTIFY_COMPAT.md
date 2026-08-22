@@ -53,7 +53,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
   之后重启保持稳定；明文仅用于首次展示，丢失后请改用环境变量预置或删除该文件重新生成。
 - 数据目录不可写时退化为内存存储（不持久化），hotify-bridge 靠 id 倒退信号兜底重启场景。
 - **查看自动生成的 token（Docker）**：首次启动（数据目录为空/新卷）时运行
-  `docker logs -f hotify-bark-server`（容器名按你的 `--name` 或 compose 服务名调整），
+  `docker logs -f timelynotify-server`（容器名按你的 `--name` 或 compose 服务名调整），
   可以看到 `INFO ... Generated client token (set bridge gotify_token to this): <token>`；
   该行**只在首次生成时打印一次**，之后重启打印的是持久化位置提示（见上）。想随时拿到
   token，请预置（推荐），或停服删除 `<data>/gotify.db` 后重新生成。

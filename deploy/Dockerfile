@@ -1,8 +1,8 @@
 FROM golang:1-alpine AS builder
 
-COPY . /go/src/github.com/wallleap/hotify-bark-server
+COPY . /go/src/github.com/wallleap/timelynotify-server
 
-WORKDIR /go/src/github.com/wallleap/hotify-bark-server
+WORKDIR /go/src/github.com/wallleap/timelynotify-server
 
 # Use China-accessible Go module proxy by default (proxy.golang.org is often
 # unreachable from CN networks, causing `go: downloading ... i/o timeout`).
@@ -54,13 +54,13 @@ RUN set -ex \
     && addgroup -S -g 1000 app \
     && adduser -S -u 1000 -h /home/app -G app app
 
-COPY --from=builder /go/bin/hotify-bark-server /usr/local/bin/hotify-bark-server
-COPY --from=builder /go/src/github.com/wallleap/hotify-bark-server/deploy/entrypoint.sh /entrypoint.sh
+COPY --from=builder /go/bin/timelynotify-server /usr/local/bin/timelynotify-server
+COPY --from=builder /go/src/github.com/wallleap/timelynotify-server/deploy/entrypoint.sh /entrypoint.sh
 
 # Default data dir (overridable via BARK_SERVER_DATA_DIR / --data). Make it
 # writable by the non-root app user and switch to least privilege.
 ENV BARK_SERVER_DATA_DIR=/data
-RUN mkdir -p /data && chown -R app:app /data && chmod 755 /usr/local/bin/hotify-bark-server /entrypoint.sh
+RUN mkdir -p /data && chown -R app:app /data && chmod 755 /usr/local/bin/timelynotify-server /entrypoint.sh
 
 USER app
 
@@ -70,4 +70,4 @@ EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]
 
-CMD ["hotify-bark-server"]
+CMD ["timelynotify-server"]

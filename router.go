@@ -106,10 +106,10 @@ func routerSetupCommon(router fiber.Router) {
 			Output:     redactingWriter{w: os.Stdout},
 		}))
 		router.Use(fiberrecover.New())
-		// Instrument every request (guarded: barkMetrics is nil until
+		// Instrument every request (guarded: tnMetrics is nil until
 		// runServer initializes it).
-		if barkMetrics != nil {
-			router.Use(barkMetrics.Middleware())
+		if tnMetrics != nil {
+			router.Use(tnMetrics.Middleware())
 		}
 	})
 }

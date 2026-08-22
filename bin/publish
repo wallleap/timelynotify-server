@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 构建并发布 hotify-bark-server 镜像到 Docker Hub
+# 构建并发布 timelynotify-server 镜像到 Docker Hub
 #
 # 用法:
-#   bin/publish                          # 默认: wallleap/hotify-bark-server:<git tag|latest> (宿主机单架构)
-#   IMAGE=yourname/hotify-bark-server bin/publish
+#   bin/publish                          # 默认: wallleap/timelynotify-server:<git tag|latest> (宿主机单架构)
+#   IMAGE=yourname/timelynotify-server bin/publish
 #   TAG=v1.2.3 bin/publish
 #   PUSH_LATEST=0 bin/publish            # 不额外打 latest 标签
 #   bin/publish --all                    # 多架构构建并推送 (linux/amd64, linux/arm64, linux/arm/v7)
@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-IMAGE="${IMAGE:-wallleap/hotify-bark-server}"
+IMAGE="${IMAGE:-wallleap/timelynotify-server}"
 TAG="${TAG:-}"
 if [ -z "$TAG" ]; then
     TAG="$(git describe --tags 2>/dev/null || echo latest)"
@@ -38,7 +38,7 @@ if [ -n "$PLATFORM" ]; then
         echo "==> buildx 不可用，请使用 Docker 23+ 或启用 Buildx 插件" >&2
         exit 1
     fi
-    BUILDER="hotify-builder"
+    BUILDER="timelynotify-builder"
     if ! docker buildx ls --format '{{.Name}}' 2>/dev/null | grep -qx "$BUILDER"; then
         echo "==> 创建并启用 buildx builder: $BUILDER (docker-container)..."
         docker buildx create --name "$BUILDER" --driver docker-container --bootstrap --use

@@ -7,7 +7,7 @@ SERVER_PORT=18080
 DATA_DIR="./test-data"
 
 echo "=============================================="
-echo "  🚀 Hotify-Bark-Server 鸿蒙推送本地测试"
+echo "  🚀 TimelyNotify-Server 鸿蒙推送本地测试"
 echo "=============================================="
 echo ""
 

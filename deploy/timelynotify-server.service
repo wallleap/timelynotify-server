@@ -1,5 +1,5 @@
 [Unit]
-Description=Hotify-Bark server
+Description=TimelyNotify server
 After=network.target
 
 [Service]
@@ -7,8 +7,8 @@ Type=simple
 # 修改后的参数通过环境文件注入，格式: KEY=value，一行一个。
 # 例: BARK_SERVER_GOTIFY_CLIENT_TOKEN=your-token
 #     BARK_SERVER_BASIC_AUTH_USER=admin
-EnvironmentFile=-/etc/hotify-bark-server.env
-ExecStart=/usr/local/bin/hotify-bark-server --addr 0.0.0.0:8080 --data /data
+EnvironmentFile=-/etc/timelynotify-server.env
+ExecStart=/usr/local/bin/timelynotify-server --addr 0.0.0.0:8080 --data /data
 ExecStop=/bin/kill -s QUIT $MAINPID
 Restart=on-failure
 

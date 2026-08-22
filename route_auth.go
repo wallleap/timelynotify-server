@@ -5,7 +5,7 @@ import (
 	fiberbasicauth "github.com/gofiber/fiber/v2/middleware/basicauth"
 	"github.com/mritd/logger"
 
-	"github.com/wallleap/hotify-bark-server/internal/authfree"
+	"github.com/wallleap/timelynotify-server/internal/authfree"
 )
 
 // basicAuthEnabled reports whether Basic Auth was configured at startup. It
@@ -29,14 +29,14 @@ func routerAuth(user, passwd string, router fiber.Router, urlPrefix string) {
 	basicAuthEnabled = user != "" && passwd != ""
 	if user == "" && passwd == "" {
 		logger.Warn("************************************************************")
-		logger.Warn("Hotify-Bark Server Has NO Basic Auth.")
+		logger.Warn("TimelyNotify Server Has NO Basic Auth.")
 		logger.Warn("PUBLIC deployments should set BARK_SERVER_BASIC_AUTH_USER/PASSWORD.")
 		logger.Warn("/push, /register, /mcp* and /:device_key are OPEN to everyone.")
 		logger.Warn("************************************************************")
 		return
 	}
 
-	logger.Info("Hotify-Bark Server Has Basic Auth Enabled.")
+	logger.Info("TimelyNotify Server Has Basic Auth Enabled.")
 	basicAuth := fiberbasicauth.New(fiberbasicauth.Config{
 		Users:           map[string]string{user: passwd},
 		Realm:           "Coffee Time",

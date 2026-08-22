@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "hotify-bark-server.fullname" . }}
+  name: {{ include "timelynotify-server.fullname" . }}
   labels:
-    {{- include "hotify-bark-server.labels" . | nindent 4 }}
+    {{- include "timelynotify-server.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -12,4 +12,4 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "hotify-bark-server.selectorLabels" . | nindent 4 }}
+    {{- include "timelynotify-server.selectorLabels" . | nindent 4 }}

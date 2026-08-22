@@ -1,6 +1,6 @@
 {
-  "name": "hotify-bark-server",
-  "description": "Backend of Hotify-Bark (fork of Bark)",
+  "name": "timelynotify-server",
+  "description": "Backend of TimelyNotify (fork of Bark)",
   "env": {
     "BARK_KEY": {
       "description": "Bark Key",
@@ -11,6 +11,6 @@
       "value": ""
     }
   },
-  "website": "https://github.com/wallleap/hotify-bark-server",
-  "repository": "https://github.com/wallleap/hotify-bark-server"
+  "website": "https://github.com/wallleap/timelynotify-server",
+  "repository": "https://github.com/wallleap/timelynotify-server"
 }

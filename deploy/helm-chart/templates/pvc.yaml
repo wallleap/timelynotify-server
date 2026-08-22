@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "hotify-bark-server.fullname" . }}-data
+  name: {{ include "timelynotify-server.fullname" . }}-data
   labels:
-    {{- include "hotify-bark-server.labels" . | nindent 4 }}
+    {{- include "timelynotify-server.labels" . | nindent 4 }}
 spec:
   accessModes:
     - ReadWriteOnce

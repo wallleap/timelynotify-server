@@ -8,11 +8,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wallleap/hotify-bark-server/apns"
-	"github.com/wallleap/hotify-bark-server/database"
-	"github.com/wallleap/hotify-bark-server/internal/gotifycompat"
-	"github.com/wallleap/hotify-bark-server/internal/logging"
-	"github.com/wallleap/hotify-bark-server/internal/metrics"
+	"github.com/wallleap/timelynotify-server/apns"
+	"github.com/wallleap/timelynotify-server/database"
+	"github.com/wallleap/timelynotify-server/internal/gotifycompat"
+	"github.com/wallleap/timelynotify-server/internal/logging"
+	"github.com/wallleap/timelynotify-server/internal/metrics"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -30,14 +30,14 @@ var (
 
 var db database.Database
 
-// barkMetrics is the global Prometheus registry. Registered as nil until
+// tnMetrics is the global Prometheus registry. Registered as nil until
 // runServer initializes it, so package-level routes can safely reference it.
-var barkMetrics *metrics.Registry
+var tnMetrics *metrics.Registry
 
 func main() {
 	app := &cli.App{
-		Name:    "hotify-bark-server",
-		Usage:   "Push Server For Hotify-Bark (fork of Bark)",
+		Name:    "timelynotify-server",
+		Usage:   "Push Server For TimelyNotify (fork of Bark Server)",
 		Version: fmt.Sprintf("%s %s %s", version, commitID, buildDate),
 		Flags:   getAppFlags(),
 		Authors: []*cli.Author{
@@ -57,7 +57,7 @@ func runServer(c *cli.Context) error {
 	if err := applyLogConfig(c); err != nil {
 		return err
 	}
-	barkMetrics = metrics.New()
+	tnMetrics = metrics.New()
 	network := determineNetwork(c)
 	fiberApp := createFiberApp(c, network)
 	setupRouter(c, fiberApp)
@@ -88,7 +88,7 @@ func applyLogConfig(c *cli.Context) error {
 // initGotifyCompat initializes the gotify-compatible monitoring interface
 // (WebSocket /stream + /message + /version) used by hotify-bridge. Persistence
 // falls back to in-memory when the data directory is unusable; the returned
-// error is logged, never fatal to the bark server.
+// error is logged, never fatal to the server.
 func initGotifyCompat(c *cli.Context) {
 	svc, err := gotifycompat.Init(gotifycompat.Config{
 		DataDir:     c.String("data"),
@@ -124,7 +124,7 @@ func determineNetwork(c *cli.Context) string {
 
 func createFiberApp(c *cli.Context, network string) *fiber.App {
 	return fiber.New(fiber.Config{
-		ServerHeader:      "Hotify-Bark",
+		ServerHeader:      "TimelyNotify",
 		CaseSensitive:     c.Bool("case-sensitive"),
 		StrictRouting:     c.Bool("strict-routing"),
 		Concurrency:       c.Int("concurrency"),
@@ -192,7 +192,7 @@ func setupGracefulShutdown(fiberApp *fiber.App) {
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		for range sigs {
-			logger.Warn("Received a termination signal, hotify-bark-server shutdown...")
+			logger.Warn("Received a termination signal, timelynotify-server shutdown...")
 			if err := fiberApp.Shutdown(); err != nil {
 				logger.Errorf("Server forced to shutdown error: %v", err)
 			}
@@ -206,7 +206,7 @@ func setupGracefulShutdown(fiberApp *fiber.App) {
 func startServer(c *cli.Context, fiberApp *fiber.App, network string) error {
 	if network == "tcp" {
 		addr := c.String("addr")
-		logger.Infof("Hotify-Bark Server Listen at: %s , Database: %s", addr, reflect.TypeOf(db))
+		logger.Infof("TimelyNotify Server Listen at: %s , Database: %s", addr, reflect.TypeOf(db))
 
 		cert, key := c.String("cert"), c.String("key")
 		if cert != "" && key != "" {
@@ -218,7 +218,7 @@ func startServer(c *cli.Context, fiberApp *fiber.App, network string) error {
 	// Unix socket
 	socket := c.String("unix-socket")
 	os.Remove(socket)
-	logger.Infof("Hotify-Bark Server Listen at: %s , Database: %s", socket, reflect.TypeOf(db))
+	logger.Infof("TimelyNotify Server Listen at: %s , Database: %s", socket, reflect.TypeOf(db))
 	return fiberApp.Listen(socket)
 }
 
@@ -340,7 +340,7 @@ func getAppFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    "proxy-header",
-			Usage:   "The remote IP address used by the bark server http header",
+			Usage:   "The remote IP address used by the server for proxy header detection",
 			EnvVars: []string{"BARK_SERVER_PROXY_HEADER"},
 			Value:   "",
 		},

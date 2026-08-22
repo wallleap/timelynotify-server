@@ -1,6 +1,6 @@
 // +heroku goVersion go1.17
 
-module github.com/wallleap/hotify-bark-server
+module github.com/wallleap/timelynotify-server
 
 go 1.25.5
 

@@ -1,1 +1,1 @@
-web: bin/hotify-bark-server -addr 0.0.0.0:$PORT -serverless true
+web: bin/timelynotify-server -addr 0.0.0.0:$PORT -serverless true

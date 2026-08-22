@@ -38,7 +38,7 @@ func init() {
 }
 
 func setupGenericMCPServer() *server.StreamableHTTPServer {
-	s := server.NewMCPServer("Hotify-Bark MCP Server", version,
+	s := server.NewMCPServer("TimelyNotify MCP Server", version,
 		server.WithToolCapabilities(true),
 		server.WithRecovery(),
 	)
@@ -59,7 +59,7 @@ func setupGenericMCPServer() *server.StreamableHTTPServer {
 }
 
 func setupSpecificMCPServer() *server.StreamableHTTPServer {
-	s := server.NewMCPServer("Hotify-Bark MCP Server (Specific)", version,
+	s := server.NewMCPServer("TimelyNotify MCP Server (Specific)", version,
 		server.WithToolCapabilities(true),
 		server.WithRecovery(),
 	)
@@ -109,7 +109,7 @@ func notifyHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallT
 
 func getCommonToolOpts() []mcp.ToolOption {
 	return []mcp.ToolOption{
-		mcp.WithDescription("Send a notification to a device via Bark"),
+		mcp.WithDescription("Send a notification to a device via TimelyNotify"),
 		mcp.WithString("title", mcp.Description("Notification title")),
 		mcp.WithString("subtitle", mcp.Description("Notification subtitle")),
 		mcp.WithString("body", mcp.Description("Notification content")),

@@ -7,7 +7,7 @@ cd "$ROOT"
 
 GOOS="${GOOS:-$(go env GOOS)}"
 GOARCH="${GOARCH:-$(go env GOARCH)}"
-OUT="${OUT:-dist/hotify-bark-server}"
+OUT="${OUT:-dist/timelynotify-server}"
 
 VERSION="$(git describe --tags 2>/dev/null || echo dev)"
 BUILD_DATE="$(date '+%F %T')"

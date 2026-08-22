@@ -4,7 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mritd/logger"
 
-	"github.com/wallleap/hotify-bark-server/database"
+	"github.com/wallleap/timelynotify-server/database"
 )
 
 type DeviceInfo struct {

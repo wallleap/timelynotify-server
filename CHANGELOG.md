@@ -1,6 +1,6 @@
 <a name="unreleased"></a>
 
-## [v0.4.0](https://github.com/wallleap/hotify-bark-server/compare/v0.3.0...v0.4.0)
+## [v0.4.0](https://github.com/wallleap/timelynotify-server/compare/v0.3.0...v0.4.0)
 
 > 2026-08-08
 
@@ -20,7 +20,7 @@
 - **auth:** whitelist /info from Basic Auth, gate device count behind valid creds
 
 
-## [v0.3.0](https://github.com/wallleap/hotify-bark-server/compare/v0.2.2...v0.3.0)
+## [v0.3.0](https://github.com/wallleap/timelynotify-server/compare/v0.2.2...v0.3.0)
 
 > 2026-08-08
 
@@ -55,7 +55,7 @@
 - **gotify:** cover device-scoped limit, ordering and SourceDevice precedence
 
 
-## [v0.2.2](https://github.com/wallleap/hotify-bark-server/compare/v0.2.1...v0.2.2)
+## [v0.2.2](https://github.com/wallleap/timelynotify-server/compare/v0.2.1...v0.2.2)
 
 > 2026-08-07
 
@@ -68,7 +68,7 @@
 - update CHANGELOG for v0.2.2
 
 
-## [v0.2.1](https://github.com/wallleap/hotify-bark-server/compare/v0.2.0...v0.2.1)
+## [v0.2.1](https://github.com/wallleap/timelynotify-server/compare/v0.2.0...v0.2.1)
 
 > 2026-08-07
 
@@ -83,7 +83,7 @@
 - add git-chglog for CHANGELOG generation
 
 
-## [v0.2.0](https://github.com/wallleap/hotify-bark-server/compare/v0.1.0...v0.2.0)
+## [v0.2.0](https://github.com/wallleap/timelynotify-server/compare/v0.1.0...v0.2.0)
 
 > 2026-08-07
 
@@ -140,7 +140,7 @@
 - keep client token out of access logs
 - harden apns error handling and basic auth whitelist
 - ensure gotify client token is printed on first boot
-- [#66](https://github.com/wallleap/hotify-bark-server/issues/66)
+- [#66](https://github.com/wallleap/timelynotify-server/issues/66)
 - increase maximum device token length
 - return error for invalid device token removal
 - mask token query param in access logs
@@ -200,7 +200,7 @@
 - 优化 时区设置
 - add apns push msg payload size check
 - add delete message endpoints to gotify compat
-- rebrand finb/bark-server fork as hotify-bark-server
+- rebrand finb/bark-server fork as timelynotify-server
 - 添加并设置时区为中国时区
 - 优化时区设置
 - **apns:** add apple CAs

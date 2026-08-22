@@ -1,4 +1,4 @@
-# Default values for hotify-bark-server.
+# Default values for timelynotify-server.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
@@ -20,7 +20,7 @@ extra_database:
   # database: bark
 
 image:
-  repository: docker.io/wallleap/hotify-bark-server
+  repository: docker.io/wallleap/timelynotify-server
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "v2.1.5"
@@ -68,7 +68,7 @@ ingress:
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
-    - host: hotify-bark-server.default.svc.cluster.local
+    - host: timelynotify-server.default.svc.cluster.local
       paths:
         - path: /
           pathType: Prefix

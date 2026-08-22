@@ -490,6 +490,6 @@ Prometheus 指标端点（免 Basic Auth 时需要显式放行；开启 Basic Au
 curl "http://127.0.0.1:18080/metrics"
 ```
 
-- `hotify_bark_http_requests_total{method,status}`：HTTP 请求计数（status 为粗粒度分类 `2xx/4xx/5xx` 等）。
-- `hotify_bark_active_streams`：当前活跃的 `/stream` WebSocket 连接数。
+- `timelynotify_http_requests_total{method,status}`：HTTP 请求计数（status 为粗粒度分类 `2xx/4xx/5xx` 等）。
+- `timelynotify_active_streams`：当前活跃的 `/stream` WebSocket 连接数。
 - 标准 Go/进程收集器（`go_*`、`process_*`）。

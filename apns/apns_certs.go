@@ -1,6 +1,6 @@
 package apns
 
-// Bark push private key
+// TimelyNotify push private key (forked from Bark)
 const apnsPrivateKey = `-----BEGIN PRIVATE KEY-----
 MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg4vtC3g5L5HgKGJ2+
 T1eA0tOivREvEAY2g+juRXJkYL2gCgYIKoZIzj0DAQehRANCAASmOs3JkSyoGEWZ

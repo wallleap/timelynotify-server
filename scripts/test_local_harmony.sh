@@ -8,7 +8,7 @@ SERVER_DATA_DIR="./dev-data"
 HARMONY_CERTS_FILE="harmony/harmony_certs.go"
 
 echo "=============================================="
-echo "  Hotify-Bark-Server: HarmonyOS 本地集成测试"
+echo "  TimelyNotify-Server: HarmonyOS 本地集成测试"
 echo "=============================================="
 echo ""
 
@@ -61,7 +61,7 @@ import (
     "net/http"
     "time"
     
-    "github.com/wallleap/hotify-bark-server/harmony"
+    "github.com/wallleap/timelynotify-server/harmony"
 )
 
 const (
@@ -121,7 +121,7 @@ func main() {
     pushData := map[string]interface{}{
         "device_key": testDeviceKey,
         "title":      "测试通知",
-        "body":       "这是一条来自 Hotify-Bark-Server 的鸿蒙测试推送!",
+        "body":       "这是一条来自 TimelyNotify-Server 的鸿蒙测试推送!",
         "level":      "active",
     }
     pushJSON, _ := json.Marshal(pushData)
@@ -151,7 +151,7 @@ func prettyJSON(v interface{}) string {
 EOF
 
 # Step 3: Start bark server with a special flag to use mock URL
-echo "[3/4] 启动 Hotify-Bark-Server (集成 Mock 模式)..."
+echo "[3/4] 启动 TimelyNotify-Server (集成 Mock 模式)..."
 
 # We need to modify the server to accept a --harmony-mock-url flag
 # For now, let's create a small wrapper that patches the code

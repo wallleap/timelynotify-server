@@ -10,9 +10,9 @@ import (
 	"github.com/gofiber/fiber/v2/utils"
 	"github.com/mritd/logger"
 
-	"github.com/wallleap/hotify-bark-server/apns"
-	"github.com/wallleap/hotify-bark-server/database"
-	"github.com/wallleap/hotify-bark-server/harmony"
+	"github.com/wallleap/timelynotify-server/apns"
+	"github.com/wallleap/timelynotify-server/database"
+	"github.com/wallleap/timelynotify-server/harmony"
 
 	"github.com/gofiber/fiber/v2"
 )

@@ -45,10 +45,10 @@ jobs:
             linux/arm64
             linux/amd64
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/hotify-bark-server:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/hotify-bark-server:${{ steps.vars.outputs.build_version }}
-            ghcr.io/${{ github.repository_owner }}/hotify-bark-server:latest
-            ghcr.io/${{ github.repository_owner }}/hotify-bark-server:${{ steps.vars.outputs.build_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/timelynotify-server:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/timelynotify-server:${{ steps.vars.outputs.build_version }}
+            ghcr.io/${{ github.repository_owner }}/timelynotify-server:latest
+            ghcr.io/${{ github.repository_owner }}/timelynotify-server:${{ steps.vars.outputs.build_version }}
           push: true
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}

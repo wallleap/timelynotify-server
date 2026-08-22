@@ -23,11 +23,11 @@
 
 ## 命名变更
 
-- Go module：`github.com/finb/bark-server/v2` → `github.com/wallleap/hotify-bark-server`
-- 二进制：`bark-server` → `hotify-bark-server`
-- Docker 镜像：`finab/bark-server` → `wallleap/hotify-bark-server`
-- HTTP ServerHeader：`Bark` → `Hotify-Bark`
-- CLI 名称 / 日志 / MCP 服务名均改为 Hotify-Bark 前缀
+- Go module：`github.com/finb/bark-server/v2` → `github.com/wallleap/timelynotify-server`
+- 二进制：`bark-server` → `timelynotify-server`
+- Docker 镜像：`finab/bark-server` → `wallleap/timelynotify-server`
+- HTTP ServerHeader：`Bark` → `TimelyNotify`
+- CLI 名称 / 日志 / MCP 服务名均改为 TimelyNotify 前缀
 - 无鉴权部署在启动日志给出醒目警告，提示公网部署需开启 Basic Auth
 
 ## 其它调整
