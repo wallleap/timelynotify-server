@@ -3,11 +3,14 @@ package main
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mritd/logger"
+
+	"github.com/wallleap/hotify-bark-server/database"
 )
 
 type DeviceInfo struct {
 	DeviceKey   string `form:"device_key,omitempty" json:"device_key,omitempty" xml:"device_key,omitempty" query:"device_key,omitempty"`
 	DeviceToken string `form:"device_token,omitempty" json:"device_token,omitempty" xml:"device_token,omitempty" query:"device_token,omitempty"`
+	Platform    string `form:"platform,omitempty" json:"platform,omitempty" xml:"platform,omitempty" query:"platform,omitempty"`
 
 	// compatible with old req
 	OldDeviceKey   string `form:"key,omitempty" json:"key,omitempty" xml:"key,omitempty" query:"key,omitempty"`
@@ -55,9 +58,23 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 		return c.Status(400).JSON(failed(400, "device token is invalid"))
 	}
 
-	// if deviceInfo.DeviceKey=="", newKey will be filled with a new uuid
-	// otherwise it equal to deviceInfo.DeviceKey
-	newKey, err := db.SaveDeviceTokenByKey(deviceInfo.DeviceKey, deviceInfo.DeviceToken)
+	// Validate platform if provided
+	platform := "ios"
+	if deviceInfo.Platform != "" {
+		platform = deviceInfo.Platform
+		if platform != "ios" && platform != "harmony" {
+			return c.Status(400).JSON(failed(400, "invalid platform (must be 'ios' or 'harmony')"))
+		}
+	}
+
+	// Save device info using new API (supports platform)
+	dbInfo := &database.DeviceInfo{
+		Key:      deviceInfo.DeviceKey,
+		Token:    deviceInfo.DeviceToken,
+		Platform: platform,
+	}
+	
+	newKey, err := db.SaveDeviceInfo(dbInfo)
 	if err != nil {
 		logger.Errorf("device registration failed: %v", err)
 		return c.Status(500).JSON(failed(500, "device registration failed: %v", err))
@@ -69,6 +86,7 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 		"key":          deviceInfo.DeviceKey,
 		"device_key":   deviceInfo.DeviceKey,
 		"device_token": deviceInfo.DeviceToken,
+		"platform":     platform,
 	}))
 }
 

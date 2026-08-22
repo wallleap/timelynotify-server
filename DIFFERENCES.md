@@ -8,6 +8,7 @@
 
 | 功能 | 说明 | 文档 |
 |---|---|---|
+| 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；`level` 字段映射到华为 `click_action` | [API_V2.md](docs/API_V2.md) |
 | Gotify 兼容监控及其它消息相关接口 | `GET /version`、`GET /message`、`GET /stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | MCP 推送 | `POST /mcp`、`POST /mcp/:device_key`，AI 代理可通过 Model Context Protocol 直接发推送 | [MCP.md](docs/MCP.md) |
 | Basic Auth | 可选 `--user/--password`，`/ping` `/register` `/healthz` `/version` `/info` `/message` `/stream` 白名单（`/info` 无凭据显示基础信息，带凭据才含设备数） | |

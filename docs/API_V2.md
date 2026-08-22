@@ -10,6 +10,7 @@ the V2 version.**
 - [API V2](#api-v2)
     * [Push](#push)
         + [curl](#curl)
+        + [HarmonyOS Push (curl)](#harmonyos-push-curl)
         + [Batch push (curl)](#batch-push-curl)
         + [golang](#golang)
         + [python](#python)
@@ -38,6 +39,7 @@ the V2 version.**
 | body  | string | Notification content |
 | device_key | string | The key for each device |
 | device_keys (optional) | array | Used for batch pushing |
+| platform (optional) | string | Override the device's registered platform: `ios` or `harmony` |
 | level (optional) | string | `'critical'`, `'active'`, `'timeSensitive'`, `'passive'` |
 | volume (optional) | string | The ringtone volume for critical alert notification. |
 | badge (optional) | integer | The number displayed next to App icon ([Apple Developer](https://developer.apple.com/documentation/usernotifications/unnotificationcontent/1649864-badge)) |
@@ -56,6 +58,8 @@ the V2 version.**
 | action (optional) | string | Set to "none", tap notifications do nothing |
 | delete (optional) | string | Must be `1`. Silent push: delivers a background push and is not shown on screen |
 
+> **Platform routing**: When a device is registered with `platform: harmony`, the server automatically routes push requests through the Huawei Push Kit API. You can also override the platform per-request by including `"platform": "harmony"` or `"platform": "ios"` in the push body. The `level` field is mapped to Huawei `click_action` as follows: when `level` is not specified, the default is `launch` (full-screen notification); `critical`/`timeSensitive` → `launch`; `active` → `banner`; all other values (e.g. `passive`) → `page`.
+
 ### curl
 
 ```sh
@@ -72,6 +76,40 @@ curl -X "POST" "http://127.0.0.1:18080/push" \
   "url": "https://mritd.com"
 }'
 ```
+
+### HarmonyOS Push (curl)
+
+推送鸿蒙设备与 iOS 设备使用完全相同的 API。服务端会根据设备注册时的 `platform` 字段自动选择通道，无需客户端额外指定。
+
+```sh
+# 1. 先注册鸿蒙设备
+curl -X POST "http://127.0.0.1:18080/register" \
+     -H 'Content-Type: application/json' \
+     -d '{
+  "device_key": "my-harmony-device",
+  "device_token": "<harmony_push_token>",
+  "platform": "harmony"
+}'
+
+# 2. 发送推送（与 iOS 推送格式完全相同）
+curl -X POST "http://127.0.0.1:18080/push" \
+     -H 'Content-Type: application/json' \
+     -d '{
+  "device_key": "my-harmony-device",
+  "title": "鸿蒙测试通知",
+  "body": "这是一条鸿蒙推送测试消息",
+  "level": "active"
+}'
+```
+
+**鸿蒙特有字段**：`level` 字段映射到华为 `click_action`：
+
+| Bark level | 华为 click_action | 说明 |
+|---|---|---|
+| 不指定（默认） | `launch` | 全屏通知，需用户立即处理 |
+| `critical` / `timeSensitive` | `launch` | 全屏通知，需用户立即处理 |
+| `active` | `banner` | 横幅通知 |
+| 其他（如 `passive`） | `page` | 普通通知 |
 
 ### Batch push (curl)
 
@@ -400,7 +438,7 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
 | GET | `/` | 无 | 存活探测，返回 `"ok"` |
-| POST | `/register` | 无 | 设备注册（body：`device_key`(可选)/`device_token`），返回 `device_key`。详见 [TUTORIAL.md](TUTORIAL.md) |
+| POST | `/register` | 无 | 设备注册（body：`device_key`(可选)/`device_token`/`platform`(可选, `ios` 或 `harmony`, 默认 `ios`)），返回 `device_key`。详见 [TUTORIAL.md](TUTORIAL.md) |
 | GET | `/register` | 无 | 设备注册（兼容旧 query 参数：`key`/`devicetoken`） |
 | GET | `/register/:device_key` | 无 | 校验 device_key 是否存在 |
 | GET | `/version` | 无 | Gotify 兼容探测，返回 `{"version":...}` |

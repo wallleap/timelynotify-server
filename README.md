@@ -1,6 +1,10 @@
 # Hotify-Bark Server
 
-Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了部分功能供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 调用，可以在推送消息到 iOS 的同时，依赖 hotify-bridge 推送消息到 HarmonyOS。
+Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了以下能力：
+
+- **原生双平台推送**：同时支持 iOS（APNs）和 HarmonyOS（华为 Push Kit）原生推送，统一 API 自动路由
+- **Gotify 兼容监控**：每一条推送都会进入 Gotify 风格的监控流，供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 消费
+- **MCP 接口**：AI 代理可直接通过 MCP 协议调用推送
 
 > **注意**：本项目基于上游修改，**不会同步回原项目**，也不会再使用上游的构建产物 / 镜像。所有二进制、镜像、module 路径均已独立命名，与上游可明确区分。
 
@@ -13,6 +17,7 @@ Hotify-Bark Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/ba
 ## 与原项目的区别
 
 - 独立的 Go module、二进制名与 Docker 镜像名（`wallleap/hotify-bark-server`）
+- 原生 HarmonyOS 推送支持（华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由）
 - 内置 [Gotify 兼容接口](./docs/GOTIFY_COMPAT.md)（`/version`、`/message`、`/stream` 等），供 hotify-bridge 监测 bark 推送或操作消息
 - 内置 [MCP](./docs/MCP.md) 接口（`/mcp`、`/mcp/:device_key`），AI 代理可直接调用推送
 - 可选 Basic Auth、MySQL TLS、gotify 客户端 token 等

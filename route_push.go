@@ -3,12 +3,16 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/gofiber/fiber/v2/utils"
+	"github.com/mritd/logger"
 
 	"github.com/wallleap/hotify-bark-server/apns"
+	"github.com/wallleap/hotify-bark-server/database"
+	"github.com/wallleap/hotify-bark-server/harmony"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -19,6 +23,38 @@ var maxBatchPushCount = -1
 // pushAPNs is the seam used by push() to deliver to APNs. Tests override it to
 // run the push pipeline offline; production keeps the real APNs client.
 var pushAPNs = func(msg *apns.PushMessage) (int, error) { return apns.Push(msg) }
+
+// harmonyClient is initialized at startup if HarmonyOS credentials are valid.
+var harmonyClient *harmony.Client
+var harmonyInitOnce sync.Once
+
+func initHarmony() {
+	harmonyInitOnce.Do(func() {
+		ts, err := harmony.NewTokenSource()
+		if err != nil {
+			logger.Warnf("HarmonyOS push client not initialized: %v", err)
+			return
+		}
+
+		// Check for mock URL in environment
+		mockURL := os.Getenv("BARK_SERVER_HARMONY_MOCK_URL")
+		if mockURL != "" {
+			logger.Infof("HarmonyOS push client using mock URL: %s", mockURL)
+			harmonyClient = harmony.NewClientWithURL(ts, mockURL)
+		} else {
+			harmonyClient = harmony.NewClient(ts)
+		}
+
+		logger.Info("HarmonyOS push client initialized")
+	})
+}
+
+var pushHarmony = func(targetTokens []string, title, body, data, clickAction string) (int, int, error) {
+	if harmonyClient == nil {
+		return 0, 0, fmt.Errorf("harmony client not initialized")
+	}
+	return harmonyClient.Send(targetTokens, title, body, data, clickAction)
+}
 
 func init() {
 	// V2 API
@@ -239,6 +275,9 @@ func push(params map[string]interface{}) (int, error) {
 				} else {
 					msg.Sound = val + ".caf"
 				}
+			case "platform":
+				// Allow specifying platform in request (e.g. "harmony" or "ios")
+				msg.ExtParams["_platform"] = val
 			default:
 				msg.ExtParams[strings.ToLower(string(key))] = val
 			}
@@ -260,18 +299,41 @@ func push(params map[string]interface{}) (int, error) {
 		msg.Body = "Empty Message"
 	}
 
-	deviceToken, err := db.DeviceTokenByKey(msg.DeviceKey)
+	// Get device info (includes platform)
+	deviceInfo, err := db.DeviceInfoByKey(msg.DeviceKey)
 	if err != nil {
-		return 400, fmt.Errorf("failed to get device token: %v", err)
+		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
 
-	msg.DeviceToken = deviceToken
+	// Determine platform: use explicitly provided one, or fall back to stored one
+	platform := deviceInfo.Platform
+	if explicitPlatform, ok := msg.ExtParams["_platform"].(string); ok && explicitPlatform != "" {
+		platform = explicitPlatform
+	}
+
+	// Ensure harmony client is initialized if needed
+	if platform == "harmony" {
+		initHarmony()
+	}
+
+	msg.DeviceToken = deviceInfo.Token
 
 	// Mirror the push into the gotify-compatible monitoring stream (hotify-bridge).
 	// Published once the device token is resolved, independent of iOS delivery.
 	gotifyPublish(&msg)
 
-	code, err := pushAPNs(&msg)
+	// Route to the appropriate push channel based on platform
+	if platform == "harmony" {
+		return pushToHarmony(deviceInfo, &msg)
+	}
+	
+	// Default: iOS (APNs)
+	return pushToAPNs(deviceInfo, &msg)
+}
+
+// pushToAPNs sends notification via APNs
+func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+	code, err := pushAPNs(msg)
 
 	// Invalid token, delete it from database.
 	if code == 410 || (code == 400 && strings.Contains(err.Error(), "BadDeviceToken")) {
@@ -280,5 +342,50 @@ func push(params map[string]interface{}) (int, error) {
 	if err != nil {
 		return 500, fmt.Errorf("push failed: %v", err)
 	}
+	return 200, nil
+}
+
+// pushToHarmony sends notification via Huawei Push Kit
+func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+	if harmonyClient == nil {
+		return 500, fmt.Errorf("harmony push client is not initialized")
+	}
+
+	// Extract click_action level if present
+	clickAction := "launch"
+	if level, ok := msg.ExtParams["level"].(string); ok {
+		// Map bark levels to Huawei click actions
+		switch strings.ToLower(level) {
+		case "critical", "timeSensitive":
+			clickAction = "launch" // Full-screen notification
+		case "active":
+			clickAction = "banner" // Banner notification
+		default:
+			clickAction = "page" // Normal notification
+		}
+	}
+
+	// Extract data payload
+	var dataStr string
+	if customData, ok := msg.ExtParams["data"].(string); ok {
+		dataStr = customData
+	}
+
+	_, hmsCode, err := pushHarmony(
+		[]string{deviceInfo.Token},
+		msg.Title,
+		msg.Body,
+		dataStr,
+		clickAction,
+	)
+
+	if err != nil {
+		// Handle token expiry - clear the token if it's invalid
+		if hmsCode == 80200001 { // invalid token
+			_, _ = db.SaveDeviceTokenByKey(msg.DeviceKey, "")
+		}
+		return 500, fmt.Errorf("harmony push failed (code %d): %v", hmsCode, err)
+	}
+
 	return 200, nil
 }

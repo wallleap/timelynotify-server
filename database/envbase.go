@@ -34,6 +34,22 @@ func (d *EnvBase) DeleteDeviceByKey(key string) error {
 	return fmt.Errorf("not supported")
 }
 
+// DeviceInfoByKey (Legacy support: returns info with "ios" platform)
+func (d *EnvBase) DeviceInfoByKey(key string) (*DeviceInfo, error) {
+	if key == os.Getenv("BARK_KEY") {
+		return &DeviceInfo{Key: key, Token: os.Getenv("BARK_DEVICE_TOKEN"), Platform: "ios"}, nil
+	}
+	return nil, fmt.Errorf("key not found")
+}
+
+// SaveDeviceInfo (Legacy support: defaults to "ios" platform)
+func (d *EnvBase) SaveDeviceInfo(info *DeviceInfo) (string, error) {
+	if info.Token == os.Getenv("BARK_DEVICE_TOKEN") {
+		return os.Getenv("BARK_KEY"), nil
+	}
+	return "", fmt.Errorf("device token is invalid")
+}
+
 func (d *EnvBase) Close() error {
 	return nil
 }

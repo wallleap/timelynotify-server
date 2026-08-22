@@ -5,7 +5,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 - 像监测 Gotify 一样监测 bark——bark 每收到一次推送，就把它持久化为一条 gotify 风格的消息，并实时推送给订阅者
 - 同时可以获取、删除消息
 
-> iOS 侧投递成败**不影响**这条监测流（hotify-bridge 拿到消息后照常转推华为 Push Kit）
+> iOS / HarmonyOS 侧投递成败**不影响**这条监测流（`gotifyPublish` 在路由到具体推送通道前即执行）
 
 ## 接口
 
@@ -83,7 +83,7 @@ gotify_token: <上面拿到的 client token>
 
 ## 行为与运维说明
 
-- 推送即发布：`push()` 解析到 `device_token` 后即写入消息并广播，**不等待** APNs 结果。
+- 推送即发布：`push()` 解析到 `device_token` 后即写入消息并广播，**不等待** APNs 或华为推送结果。
 - **batch 推送会为每个设备各发布一条消息**（每条一次 `push()`），对应每条设备级投递。
 - 消息保留最近 **1000** 条（`<data>/gotify.db`），超出自动裁剪；桥断线回补最多覆盖最新 100 条。
 - 消息 ID 单调递增（bbolt `NextSequence`），重启不倒退；若存储被重置，桥按 id 倒退信号自动重置水位。
@@ -94,3 +94,4 @@ gotify_token: <上面拿到的 client token>
   并返回 `401`，请改用 `POST /push` 或换设备 key。
 - WebSocket 心跳：服务器 45s 发一次 ping；客户端 ping（桥每 20s）会刷新读超时（60s），
   静默失效的连接会被回收。WebSocket 默认放行所有 Origin（桥不发 Origin）。
+- 平台路由：推送消息会按设备注册时的 `platform` 字段自动路由到 APNs（iOS）或华为 Push Kit（HarmonyOS）。监控流不区分平台，所有推送都会进入统一的消息流。

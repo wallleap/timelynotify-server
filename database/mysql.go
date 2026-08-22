@@ -137,6 +137,31 @@ func (d *MySQL) DeleteDeviceByKey(key string) error {
 	return err
 }
 
+// DeviceInfoByKey (MySQL support: defaults to "ios" platform since table doesn't have platform column yet)
+func (d *MySQL) DeviceInfoByKey(key string) (*DeviceInfo, error) {
+	var token string
+	err := mysqlDB.QueryRow("SELECT `token` FROM `devices` WHERE `key`=? ", key).Scan(&token)
+	if err != nil {
+		return nil, err
+	}
+	if len(token) == 0 {
+		return nil, fmt.Errorf("device token invalid")
+	}
+	return &DeviceInfo{Key: key, Token: token, Platform: "ios"}, nil
+}
+
+// SaveDeviceInfo (MySQL support: defaults to "ios" platform since table doesn't have platform column yet)
+func (d *MySQL) SaveDeviceInfo(info *DeviceInfo) (string, error) {
+	if info.Key == "" {
+		info.Key = shortuuid.New()
+	}
+	_, err := mysqlDB.Exec("INSERT INTO `devices` (`key`,`token`) VALUES (?,?) ON DUPLICATE KEY UPDATE `token`=?", info.Key, info.Token, info.Token)
+	if err != nil {
+		return "", err
+	}
+	return info.Key, nil
+}
+
 func (d *MySQL) Close() error {
 	return mysqlDB.Close()
 }

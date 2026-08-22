@@ -2,6 +2,8 @@
 
 Bark supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) via HTTP Streamable, allowing AI agents (like Claude Desktop, Cherry Studio or n8n) to send notifications directly through Bark.
 
+The MCP interface is **platform-agnostic** — it works identically for both iOS (APNs) and HarmonyOS (Huawei Push Kit) devices. The server automatically routes notifications based on the device's registered `platform` field.
+
 ### Endpoints
 
 | Endpoint           | Description                                                                                                   |
