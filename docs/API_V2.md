@@ -438,6 +438,7 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
 | GET | `/` | 无 | 存活探测，返回 `"ok"` |
+| GET | `/version` | 无（Basic Auth 开启时需凭据） | 全局版本探测，以 CommonResp 格式返回 `data.version`，供客户端校验服务端身份 |
 | POST | `/register` | 无 | 设备注册（body：`device_key`(可选)/`device_token`/`platform`(可选, `ios` 或 `harmony`, 默认 `ios`)），返回 `device_key`。详见 [TUTORIAL.md](TUTORIAL.md) |
 | GET | `/register` | 无 | 设备注册（兼容旧 query 参数：`key`/`devicetoken`） |
 | GET | `/register/:device_key` | 无 | 校验 device_key 是否存在 |
@@ -466,6 +467,22 @@ curl "http://127.0.0.1:18080/healthz"
 ```
 
 响应：`"ok"`（纯文本）。与 `/ping` 功能等价，供健康检查使用。
+
+### Version
+
+以标准 `CommonResp` 格式返回服务版本，供 Bark/Hotify 客户端在推送前校验服务端身份：
+
+```sh
+curl "http://127.0.0.1:18080/version"
+```
+
+```json
+{"code":200,"message":"success","timestamp":...,"data":{"version":"v0.4.0"}}
+```
+
+- `data.version` 为构建时经 `-ldflags` 注入的程序版本，未注入时为空字符串。
+- `/version` **不在 Basic Auth 白名单内**（白名单仅 `/ping` `/register` `/healthz` `/info` + 设备级 gotify 路径）：开启 Basic Auth 后需携带凭据，否则返回 `418`。
+- 与 `/:device_key/version`（设备级 gotify 探测，白名单放行）和 `/info`（返回 version/build/arch/commit 等完整构建信息，扁平 JSON 格式）的区别：`/version` 是全局端点，仅返回 version 字段，使用统一 `CommonResp` 结构，便于客户端用同一套解析逻辑校验。
 
 ### Info
 
