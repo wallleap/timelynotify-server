@@ -37,6 +37,17 @@ func init() {
 			return tnMetrics.Handler()(c)
 		})
 
+		// version func returns the server version in CommonResp format,
+		// used by Bark/Hotify clients to verify server identity
+		router.Get("/version", func(c *fiber.Ctx) error {
+			return c.JSON(CommonResp{
+				Code:      200,
+				Message:   "success",
+				Timestamp: time.Now().Unix(),
+				Data:      map[string]string{"version": version},
+			})
+		})
+
 		// info func returns information about the server version
 		router.Get("/info", func(c *fiber.Ctx) error {
 			resp := map[string]interface{}{
