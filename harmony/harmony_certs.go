@@ -61,7 +61,7 @@ var (
 
 	// projectID: The project_id field from the credentials JSON.
 	// This is used to construct the push API endpoint URL:
-	//   https://push-api.cloud.huawei.com/v1/<projectID>/messages:send
+	//   https://push-api.cloud.huawei.com/v3/<projectID>/messages:send
 	// Example: "461323198428915726"
 	projectID = "461323198428915726"
 

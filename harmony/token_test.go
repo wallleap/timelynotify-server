@@ -188,6 +188,11 @@ func TestTokenSource_Sign_VerifiesClaims(t *testing.T) {
 	if kid, ok := parsed.Header["kid"].(string); !ok || kid != ts.keyID {
 		t.Errorf("expected header kid=%q, got %v", ts.keyID, parsed.Header["kid"])
 	}
+
+	// Verify header typ is "JWT" (required by Huawei's documented Header shape)
+	if typ, ok := parsed.Header["typ"].(string); !ok || typ != "JWT" {
+		t.Errorf("expected header typ=%q, got %v", "JWT", parsed.Header["typ"])
+	}
 }
 
 // TestParseRSAPrivateKeyPEM verifies both PKCS#1 and PKCS#8 parsing paths.
@@ -467,6 +472,11 @@ func TestTokenSource_Get_DeterministicClaims(t *testing.T) {
 	// Verify header has kid
 	if kid, ok := parsed.Header["kid"].(string); !ok || kid != ts.keyID {
 		t.Errorf("expected header kid=%q, got %v", ts.keyID, parsed.Header["kid"])
+	}
+
+	// Verify header has typ=JWT (Huawei requires {kid, typ, alg} in Header)
+	if typ, ok := parsed.Header["typ"].(string); !ok || typ != "JWT" {
+		t.Errorf("expected header typ=%q, got %v", "JWT", parsed.Header["typ"])
 	}
 
 	// Verify exp - iat equals 3600 seconds (Huawei requirement)

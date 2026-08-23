@@ -12,7 +12,13 @@ import (
 // sendAPIURL is the Huawei Push Kit downlink message sending endpoint.
 // The project ID is interpolated at runtime since it is part of the
 // credentials defined in harmony_certs.go.
-const sendAPIURL = "https://push-api.cloud.huawei.com/v1/%s/messages:send"
+//
+// Use v3 per Huawei's "基于服务账号生成鉴权令牌" guide:
+//   https://push-api.cloud.huawei.com/v3/[projectId]/messages:send
+// V3 only supports HarmonyOS NEXT/5.x and later; V2 was for 3.x/4.x; V1 is
+// the legacy form and is not recommended. This project targets HarmonyOS
+// NEXT, so v3 is required.
+const sendAPIURL = "https://push-api.cloud.huawei.com/v3/%s/messages:send"
 
 // Message structures — subset of the Huawei Push Kit REST API. We define
 // our own structs (instead of relying on an external SDK) to keep the

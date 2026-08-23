@@ -140,6 +140,10 @@ func (ts *TokenSource) sign(iat time.Time) (token string, exp time.Time, err err
 	}
 	jw := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
 	jw.Header["kid"] = ts.keyID
+	// Per Huawei's guide the JWT Header must contain {kid, typ:"JWT", alg:"PS256"}.
+	// jwt/v4 auto-fills "alg" from the SigningMethod but not "typ", so set it
+	// explicitly to match the documented header shape.
+	jw.Header["typ"] = "JWT"
 	signed, err := jw.SignedString(ts.key)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign harmony JWT: %w", err)
