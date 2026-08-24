@@ -101,8 +101,8 @@ func TestClient_Send_JSONPayload(t *testing.T) {
 	if notify["body"] != "World" {
 		t.Errorf("expected body='World', got %v", notify["body"])
 	}
-	if notify["category"] != "MARKETING" {
-		t.Errorf("expected category='MARKETING', got %v", notify["category"])
+	if notify["category"] != "SUBSCRIPTION" {
+		t.Errorf("expected category='SUBSCRIPTION', got %v", notify["category"])
 	}
 	if notify["foregroundShow"] != true {
 		t.Errorf("expected foregroundShow=true, got %v", notify["foregroundShow"])

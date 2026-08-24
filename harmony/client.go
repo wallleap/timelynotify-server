@@ -26,7 +26,7 @@ const sendAPIURL = "https://push-api.cloud.huawei.com/v3/%s/messages:send"
 const (
 	pushTypeHeader  = "push-type"
 	pushTypeAlert   = "0"
-	defaultCategory = "MARKETING"
+	defaultCategory = "SUBSCRIPTION"
 	defaultTTL      = 86400
 )
 
