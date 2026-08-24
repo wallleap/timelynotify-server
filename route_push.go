@@ -49,11 +49,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data, clickAction string) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data string, actionType int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, clickAction)
+	return harmonyClient.Send(targetTokens, title, body, data, actionType)
 }
 
 func init() {
@@ -360,26 +360,20 @@ func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, er
 	return 200, nil
 }
 
-// pushToHarmony sends notification via Huawei Push Kit
+// pushToHarmony sends notification via Huawei Push Kit (V3 scenario API).
+//
+// V3 clickAction only has actionType 0 (open app home) or 1 (open inner
+// page); the legacy V1 launch/banner/page display mapping does not apply.
+// The Bark `level` field is an APNs concept with no direct V3 equivalent,
+// so we default to actionType 0 (open app home on click).
 func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	if harmonyClient == nil {
 		logger.Errorf("[Push] HarmonyOS client not initialized: device_key=%s", msg.DeviceKey)
 		return 500, fmt.Errorf("harmony push client is not initialized")
 	}
 
-	clickAction := "launch"
-	if level, ok := msg.ExtParams["level"].(string); ok {
-		switch strings.ToLower(level) {
-		case "critical", "timeSensitive":
-			clickAction = "launch"
-		case "active":
-			clickAction = "banner"
-		default:
-			clickAction = "page"
-		}
-	}
-
-	logger.Infof("[Push] HarmonyOS push: device_key=%s click_action=%s", msg.DeviceKey, clickAction)
+	actionType := 0
+	logger.Infof("[Push] HarmonyOS push: device_key=%s actionType=%d", msg.DeviceKey, actionType)
 
 	var dataStr string
 	if customData, ok := msg.ExtParams["data"].(string); ok {
@@ -391,7 +385,7 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 		msg.Title,
 		msg.Body,
 		dataStr,
-		clickAction,
+		actionType,
 	)
 
 	if err != nil {

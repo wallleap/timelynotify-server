@@ -38,7 +38,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 - gotifycompat 的降级原则：存储不可用 → 内存降级，日志记录，**绝不致命**（参考 `service.go` Init）。
 - 设备注册支持 `platform` 字段（`ios` 或 `harmony`），默认 `ios`；推送时根据存储的 platform 自动选择通道，也可在推送请求体中通过 `platform` 字段临时覆盖。
 - `harmony/harmony_certs.go` 是华为 Push Kit 凭证配置文件，包含 `keyID`、`subAccount`、`projectID`、`privateKey` 四个变量；**禁止将真实凭证提交到公开仓库**，文件默认是占位符会导致启动失败。
-- Bark level → 华为 click_action 映射：默认（不指定 level）→ `launch`（全屏通知），`critical`/`timeSensitive` → `launch`，`active` → `banner`（横幅通知），其他值（如 `passive`）→ `page`（普通通知）。
+- 华为 Push Kit V3 场景化消息：请求体为 `{payload:{notification},target:{token},pushOptions}`，HTTP 头必带 `push-type:0`（Alert）。`notification.clickAction` 是对象 `{actionType:0|1}`（0=进首页、1=进内页），**不是** V1 的 `click_action` 字符串（`launch`/`banner`/`page`）。`category` 默认 `MARKETING`、`foregroundShow` 默认 `true`、`pushOptions.ttl` 默认 86400。Bark `level` 字段是 APNs 概念，V3 无直接对应，统一用 `actionType=0`（点击进应用首页）；V3 通知展示样式由系统按 `category` 与前台状态决定，不再有 V1 的 launch/banner/page 之分。
 
 ## Testing
 - **先写测试用例，再实现功能**（TDD）：新功能或修复先补失败用例，实现到变绿再收工；不要"先实现后补测"。

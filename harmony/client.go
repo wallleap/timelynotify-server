@@ -20,25 +20,63 @@ import (
 // NEXT, so v3 is required.
 const sendAPIURL = "https://push-api.cloud.huawei.com/v3/%s/messages:send"
 
-// Message structures — subset of the Huawei Push Kit REST API. We define
-// our own structs (instead of relying on an external SDK) to keep the
-// package self-contained and to stay close to the wire format.
+// pushTypeHeader is the HTTP header name for the scenario message type.
+// Per the V3 docs, the request MUST carry a "push-type" header; 0 = Alert
+// (notification) message.
+const (
+	pushTypeHeader  = "push-type"
+	pushTypeAlert   = "0"
+	defaultCategory = "MARKETING"
+	defaultTTL      = 86400
+)
 
+// Message is the V3 scenario message request body.
+//
+// Per Huawei Push Kit V3 "推送场景化消息" / "发送通知消息" docs, the
+// structure is:
+//
+//	{
+//	  "payload": { "notification": {...} },
+//	  "target":  { "token": ["..."] },
+//	  "pushOptions": { "testMessage": false, "ttl": 86400 }
+//	}
+//
+// The legacy V1/V2 shape ({message:{token,notification,data}}) is NOT
+// accepted by the V3 endpoint and would silently drop messages.
 type Message struct {
-	ValidateOnly bool       `json:"validate_only,omitempty"`
-	Message      PushMessage `json:"message"`
+	Payload     Payload      `json:"payload"`
+	Target      Target       `json:"target"`
+	PushOptions *PushOptions `json:"pushOptions,omitempty"`
 }
 
-type PushMessage struct {
-	Token []string    `json:"token"`
-	Data  string      `json:"data,omitempty"`
-	Notify *Notification `json:"notification,omitempty"`
+type Payload struct {
+	Notification *Notification `json:"notification,omitempty"`
+}
+
+type Target struct {
+	Token []string `json:"token"`
+}
+
+type PushOptions struct {
+	TestMessage bool `json:"testMessage,omitempty"`
+	TTL        int  `json:"ttl,omitempty"`
 }
 
 type Notification struct {
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	ClickAction string `json:"click_action,omitempty"` // "launch", "banner", "page"
+	Category       string       `json:"category"` // e.g. "MARKETING"
+	Title          string       `json:"title"`
+	Body           string       `json:"body"`
+	ClickAction    *ClickAction `json:"clickAction,omitempty"`
+	ForegroundShow bool         `json:"foregroundShow"`
+}
+
+// ClickAction mirrors the V3 clickAction object. actionType 0 opens the
+// app home, 1 opens an inner page (requires action or uri).
+type ClickAction struct {
+	ActionType int                    `json:"actionType"`
+	Action     string                 `json:"action,omitempty"`
+	URI        string                 `json:"uri,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty"`
 }
 
 // Client is a minimal wrapper around the Huawei Push Kit HTTP API.
@@ -69,29 +107,52 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 }
 
 // Send sends a push message to one or more target tokens.
+//
+// actionType: 0 = open app home on click, 1 = open inner page.
+// data: optional JSON string placed under clickAction.data; if it is not
+// valid JSON it is wrapped as {"data": <string>}. Pass "" to omit.
+//
 // It returns the Huawei HTTP status code, the server's error code (if
 // any), and an error (wrapped with context). On token-expired errors it
 // invalidates the local cache and retries exactly once.
-func (c *Client) Send(targetTokens []string, title, body, data, clickAction string) (httpStatus int, hmsCode int, err error) {
+func (c *Client) Send(targetTokens []string, title, body, data string, actionType int) (httpStatus int, hmsCode int, err error) {
 	if len(targetTokens) == 0 {
 		return 0, 0, fmt.Errorf("no target tokens provided")
 	}
 
-	notify := &Notification{
-		Title:       title,
-		Body:        body,
-		ClickAction: clickAction,
+	clickAction := &ClickAction{ActionType: actionType}
+	if data != "" {
+		clickAction.Data = parseDataField(data)
 	}
 
-	msg := Message{
-		Message: PushMessage{
-			Token:  targetTokens,
-			Data:   data,
-			Notify: notify,
+	msg := &Message{
+		Payload: Payload{
+			Notification: &Notification{
+				Category:       defaultCategory,
+				Title:          title,
+				Body:           body,
+				ClickAction:    clickAction,
+				ForegroundShow: true,
+			},
+		},
+		Target: Target{Token: targetTokens},
+		PushOptions: &PushOptions{
+			TestMessage: false,
+			TTL:        defaultTTL,
 		},
 	}
 
-	return c.sendWithRetry(&msg)
+	return c.sendWithRetry(msg)
+}
+
+// parseDataField tries to parse data as a JSON object; on failure it wraps
+// the raw string under a "data" key so custom data is never lost.
+func parseDataField(data string) map[string]interface{} {
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &obj); err == nil {
+		return obj
+	}
+	return map[string]interface{}{"data": data}
 }
 
 // sendWithRetry performs the actual HTTP call. It retries once on the
@@ -138,6 +199,9 @@ func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	// V3 scenario message API requires the "push-type" header.
+	// 0 = Alert (notification) message.
+	req.Header.Set(pushTypeHeader, pushTypeAlert)
 
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
