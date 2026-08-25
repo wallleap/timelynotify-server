@@ -1,11 +1,29 @@
 <a name="unreleased"></a>
 
+## [v0.5.1](https://github.com/wallleap/timelynotify-server/compare/v0.5.0...v0.5.1)
+
+> 2026-08-24
+
+### Bug Fixes
+
+- **harmony:** 更新华为推送API版本至v3并完善JWT头配置
+
+### Documentation
+
+- add global /version endpoint for client identity check
+
+### Features
+
+- **route:** add /version endpoint for server version check
+
+
 ## [v0.5.0](https://github.com/wallleap/timelynotify-server/compare/v0.4.0...v0.5.0)
 
 > 2026-08-22
 
 ### Documentation
 
+- update CHANGELOG for v0.5.0
 - note push_test deviceToken requirement
 - sync Basic Auth whitelist (/info) across README, TOKENS, DIFFERENCES and review notes
 - **api:** document auth schemes, full Basic Auth whitelist and /metrics endpoint
