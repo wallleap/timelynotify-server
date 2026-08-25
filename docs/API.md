@@ -1,33 +1,30 @@
-# API V2
+# API
 
-**The V2 version API is switched to the standard REST request, and most of the compatibility
-processing has been done for the V1 version API; users should use the new REST API when using
-the V2 version.**
+兼容 V1 推送 API，V2 更改为 RESTful API
 
-> 地址中的 `18080` 是容器对外映射端口（`-p 18080:8080`）。若直接运行二进制（默认监听
-> `0.0.0.0:8080`），请使用 `8080`。
+> 地址中的 `18080` 是容器对外映射端口（`-p 18080:8080`）。若直接运行二进制（默认监听 `0.0.0.0:8080`），请使用 `8080`。
 
-- [API V2](#api-v2)
-    * [Push](#push)
-        + [curl](#curl)
-        + [HarmonyOS Push (curl)](#harmonyos-push-curl)
-        + [Batch push (curl)](#batch-push-curl)
-        + [golang](#golang)
-        + [python](#python)
-        + [java](#java)
-        + [nodejs](#nodejs)
-        + [php](#php)
-    + [参数说明与优先级](#参数说明与优先级)
-        + [V1 兼容推送（URL 路径参数）](#v1-兼容推送url-路径参数)
-        + [MCP 工具参数](#mcp-工具参数)
-    * [响应格式](#响应格式)
-    * [认证](#认证)
-    * [新增接口（本 fork）](#新增接口本-fork)
-    * [Misc](#misc)
-        + [Ping](#ping)
-        + [Healthz](#healthz)
-        + [Info](#info)
-        + [Metrics](#metrics)
+- [API](#api)
+  - [Push](#push)
+  - [curl](#curl)
+  - [HarmonyOS Push (curl)](#harmonyos-push-curl)
+  - [Batch push (curl)](#batch-push-curl)
+    - [golang](#golang)
+    - [python](#python)
+    - [java](#java)
+    - [nodejs](#nodejs)
+    - [php](#php)
+  - [参数说明与优先级](#参数说明与优先级)
+  - [V1 兼容推送（URL 路径参数）](#v1-兼容推送url-路径参数)
+  - [MCP 工具参数](#mcp-工具参数)
+  - [响应格式](#响应格式)
+  - [认证](#认证)
+  - [新增接口（本 fork）](#新增接口本-fork)
+  - [Misc](#misc)
+  - [Ping](#ping)
+  - [Healthz](#healthz)
+  - [Info](#info)
+  - [Metrics](#metrics)
 
 ## Push
 
@@ -36,7 +33,7 @@ the V2 version.**
 | id (optional) | string | Notification collapse id (APNs `apns-collapse-id`) |
 | title (optional) | string | Notification title (font size would be larger than the body) |
 | subtitle (optional) | string | Notification subtitle |
-| body  | string | Notification content |
+| body | string | Notification content |
 | device_key | string | The key for each device |
 | device_keys (optional) | array | Used for batch pushing |
 | platform (optional) | string | Override the device's registered platform: `ios` or `harmony` |
@@ -45,7 +42,7 @@ the V2 version.**
 | badge (optional) | integer | The number displayed next to App icon ([Apple Developer](https://developer.apple.com/documentation/usernotifications/unnotificationcontent/1649864-badge)) |
 | call (optional) | string | Must be `1`, The ringtone will continue to play for 30 seconds |
 | autoCopy (optional) | string | Must be `1` |
-| copy (optional) | string |  The value to be copied |
+| copy (optional) | string | The value to be copied |
 | sound (optional) | string | Value from [here](https://github.com/Finb/Bark/tree/master/Sounds)， and custom ringtones are also available |
 | icon (optional) | string | An url to the icon, available only on iOS 15 or later |
 | image (optional) | string | An url to the image, available only on iOS 15 or later |
@@ -105,7 +102,7 @@ curl -X POST "http://127.0.0.1:18080/push" \
 **鸿蒙特有字段**：`level` 字段映射到华为 `click_action`：
 
 | Bark level | 华为 click_action | 说明 |
-|---|---|---|
+| ----- | ---- | ----------- |
 | 不指定（默认） | `launch` | 全屏通知，需用户立即处理 |
 | `critical` / `timeSensitive` | `launch` | 全屏通知，需用户立即处理 |
 | `active` | `banner` | 横幅通知 |
@@ -145,44 +142,44 @@ curl -X "POST" "http://127.0.0.1:18080/push" \
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
-	"net/http"
-	"bytes"
+  "fmt"
+  "io/ioutil"
+  "net/http"
+  "bytes"
 )
 
 func sendPush() {
-	// push (POST http://127.0.0.1:18080/push)
+  // push (POST http://127.0.0.1:18080/push)
 
-	json := []byte(`{"body": "Test Bark Server","device_key": "nysrshcqielvoxsa","title": "bleem", "badge": 1, "icon": "https://day.app/assets/images/avatar.jpg", "group": "test", "url": "https://mritd.com","sound": "minuet"}`)
-	body := bytes.NewBuffer(json)
+  json := []byte(`{"body": "Test Bark Server","device_key": "nysrshcqielvoxsa","title": "bleem", "badge": 1, "icon": "https://day.app/assets/images/avatar.jpg", "group": "test", "url": "https://mritd.com","sound": "minuet"}`)
+  body := bytes.NewBuffer(json)
 
-	// Create client
-	client := &http.Client{}
+  // Create client
+  client := &http.Client{}
 
-	// Create request
-	req, err := http.NewRequest("POST", "http://127.0.0.1:18080/push", body)
-	if err != nil {
-		fmt.Println("Failure : ", err)
-	}
+  // Create request
+  req, err := http.NewRequest("POST", "http://127.0.0.1:18080/push", body)
+  if err != nil {
+    fmt.Println("Failure : ", err)
+  }
 
-	// Headers
-	req.Header.Add("Content-Type", "application/json; charset=utf-8")
+  // Headers
+  req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
-	// Fetch Request
-	resp, err := client.Do(req)
-	
-	if err != nil {
-		fmt.Println("Failure : ", err)
-	}
+  // Fetch Request
+  resp, err := client.Do(req)
 
-	// Read Response Body
-	respBody, _ := ioutil.ReadAll(resp.Body)
+  if err != nil {
+    fmt.Println("Failure : ", err)
+  }
 
-	// Display Results
-	fmt.Println("response Status : ", resp.Status)
-	fmt.Println("response Headers : ", resp.Header)
-	fmt.Println("response Body : ", string(respBody))
+  // Read Response Body
+  respBody, _ := ioutil.ReadAll(resp.Body)
+
+  // Display Results
+  fmt.Println("response Status : ", resp.Status)
+  fmt.Println("response Headers : ", resp.Header)
+  fmt.Println("response Body : ", string(respBody))
 }
 ```
 
@@ -194,7 +191,6 @@ func sendPush() {
 
 import requests
 import json
-
 
 def send_request():
     # push
@@ -410,13 +406,14 @@ curl -H "Authorization: Bearer <clientToken>" "http://127.0.0.1:18080/<device_ke
 **白名单路径**（Basic Auth 豁免，仍走各自原有认证）：
 
 | 分类 | 路径 |
-|---|---|
+| ----- | ---- |
 | 全局 | `/ping`、`/register`、`/healthz`、`/info` |
 | 设备级 | `/:device_key/version`、`/:device_key/message`、`/:device_key/message/:id`（DELETE）、`/:device_key/stream` |
 
 其中设备级 `/:device_key/message`、`/:device_key/stream` 仍需客户端 token 鉴权（见上）；`/info` 无凭据返回基础信息、带有效 Basic Auth 才返回设备数。根路径 `/` 因 BasicAuth 中间件挂载于 `Use("/+")`（不匹配零段根路径），无凭据亦返回 `"ok"`。
 
 **非白名单路径**（Basic Auth 开启时必须携带凭据）：`/push`、`/:device_key`（V1 兼容推送）、`/:device_key/:body` 等路径形态、`/mcp*`、`/metrics`。
+
 - 建议在 `Authorization` 头中携带，避免 query 明文泄露；推送参数仍可经 query 传递。
 
 ```sh
@@ -436,7 +433,7 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 除上游 V2 `/push` 外，本 fork 额外提供：
 
 | Method | Path | 认证 | 说明 |
-|---|---|---|---|
+| ----- | ---- | ---- | ----------- |
 | GET | `/` | 无 | 存活探测，返回 `"ok"` |
 | GET | `/version` | 无（Basic Auth 开启时需凭据） | 全局版本探测，以 CommonResp 格式返回 `data.version`，供客户端校验服务端身份 |
 | POST | `/register` | 无 | 设备注册（body：`device_key`(可选)/`device_token`/`platform`(可选, `ios` 或 `harmony`, 默认 `ios`)），返回 `device_key`。详见 [TUTORIAL.md](TUTORIAL.md) |

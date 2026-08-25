@@ -12,7 +12,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 每个 `device_key` 可单独访问自己的历史与实时流。**认证使用 client token**，token 读取优先级：`?token=` → `X-Gotify-Key` 头 → `Authorization: Bearer`。设备级接口只透传该 `device_key` 自己产生的消息，其它设备的消息不回。
 
 | Method | Path | 认证 | 说明 |
-|---|---|---|---|
+| ----- | ---- | ---- | ----------- |
 | GET | `/<device_key>/version` | 无 | 设备级探测，返回服务版本号 |
 | GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息（其余参数语义同全局） |
 | DELETE | `/<device_key>/message?token=<clientToken>` | `token` | 清空该设备的历史消息（其它设备保留） |

@@ -7,7 +7,7 @@
 ## 新增功能
 
 | 功能 | 说明 | 文档 |
-|---|---|---|
+| ----- | ----------- | ---- |
 | 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；`level` 字段映射到华为 `click_action` | [API_V2.md](docs/API_V2.md) |
 | Gotify 兼容监控及其它消息相关接口 | 设备级 `GET /<device_key>/version`、`GET /<device_key>/message`、`GET /<device_key>/stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | MCP 推送 | `POST /mcp`、`POST /mcp/:device_key`，AI 代理可通过 Model Context Protocol 直接发推送 | [MCP.md](docs/MCP.md) |
@@ -15,7 +15,7 @@
 | MySQL TLS | `--mysql-tls` 及配套 `mysql-ca`/`mysql-client-cert`/`mysql-client-key`/`mysql-tls-name`/`mysql-tls-skip-verify` | |
 | Gotify 客户端 token | `--gotify-client-token`，SHA-256 哈希持久化，自动生成并打印一次 | |
 | Gotify 消息上限 | `--gotify-max-messages`，配置监控消息保留条数（默认 `1000`） | |
-| 日志分级/JSON | `--log-level`（`debug|info|warn|error`）与 `--log-format`（`console|json`） | |
+| 日志分级/JSON | `--log-level`（`debug` \| `info` \| `warn` \| `error`）与 `--log-format`（`console` \| `json`） | |
 | Prometheus `/metrics` | `GET /metrics`，提供 HTTP 请求指标 + 活跃 `/stream` 连接数 + Go/进程指标 | |
 | 全局 `/version` 探测 | `GET /version`，以 `CommonResp` 格式返回 `data.version`，供 Bark/Hotify 客户端校验服务端身份；不在 Basic Auth 白名单（区别于设备级 `/:device_key/version` 与已移除的全局 gotify `/version`） | [API_V2.md](docs/API_V2.md) |
 | IP 限流 | `--rate-limit-ip` / `--rate-limit-burst`，按来源 IP 对 `/register` `/mcp*` 限流（429）；推送端点 `/push` `/:device_key` 默认不限流，可经 `--rate-limit-push` 开启 | |

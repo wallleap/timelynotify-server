@@ -59,7 +59,7 @@ curl -X POST http://<host>:18080/register \
 ## 凭证与接口一览
 
 | 凭证 | 用途 | 谁生成 | 认证哪些接口 |
-|---|---|---|---|
+| ----- | ----------- | ---- | ----------- |
 | device_token | APNs 投递目标 | iOS 系统 | `/register` 上报，推送时由服务端内部使用 |
 | harmony_token | 华为 Push Kit 投递目标 | HarmonyOS 系统 | `/register` 上报，推送时由服务端内部使用 |
 | device_key | 定位设备、推送凭证 | 用户或服务端（shortuuid） | `/push`、`/:device_key` 兼容推送、`/mcp`、`/mcp/:device_key` |
