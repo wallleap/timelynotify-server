@@ -498,6 +498,64 @@ func TestPushAPNsFailure(t *testing.T) {
 	}
 }
 
+// TestWellKnownProbeShortCircuit covers the scanner-noise guard: well-known
+// probe paths (favicon.ico, /sse, /api/*, ...) falling into the /:device_key
+// catch-all get a quiet 404 instead of the 400 lookup failure, and never
+// reach APNs or the monitoring stream — unless such a key is genuinely
+// registered, in which case it must still push normally.
+func TestWellKnownProbeShortCircuit(t *testing.T) {
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	for _, probe := range []string{"favicon.ico", "robots.txt", "sse", "api/mcp"} {
+		res := doPush(t, "GET", "/"+probe, "", false)
+		if res.StatusCode != 404 {
+			t.Fatalf("probe %q should short-circuit 404, got %d", probe, res.StatusCode)
+		}
+	}
+
+	res := doPush(t, "POST", "/push", `{"device_key":"favicon.ico"}`, true)
+	if res.StatusCode != 404 {
+		t.Fatalf("V2 probe push should short-circuit 404, got %d", res.StatusCode)
+	}
+
+	if apnsCalls != 0 {
+		t.Fatalf("APNs must not be reached for probe paths, got %d calls", apnsCalls)
+	}
+
+	// A probe-named key that IS registered must still be pushable. MemBase
+	// only serves its single test key, so swap in a stub that answers
+	// DevicesByKey("sse") with a real record.
+	origDB := db
+	db = probeNamedDB{Database: origDB}
+	t.Cleanup(func() { db = origDB })
+
+	res = doPush(t, "GET", "/sse?body=hi", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("registered probe-named key should push normally, got %d", res.StatusCode)
+	}
+	if apnsCalls != 1 {
+		t.Fatalf("registered probe-named key should go through APNs once, got %d calls", apnsCalls)
+	}
+}
+
+// probeNamedDB delegates to the real Database but pretends a device with a
+// probe-named key ("sse") is registered, to verify the probe short-circuit
+// never breaks genuinely registered keys.
+type probeNamedDB struct {
+	database.Database
+}
+
+func (p probeNamedDB) DevicesByKey(key string) ([]*database.DeviceInfo, error) {
+	if key == "sse" {
+		return []*database.DeviceInfo{{Key: key, Token: deviceToken, Platform: "ios"}}, nil
+	}
+	return p.Database.DevicesByKey(key)
+}
+
 // TestPushUnregisteredDevice covers the unknown-device path: when the
 // device_key is not registered the push must be rejected before APNs.
 func TestPushUnregisteredDevice(t *testing.T) {

@@ -20,6 +20,23 @@ import (
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 
+// wellKnownProbeKeys are path segments commonly probed by internet scanners
+// (GET /favicon.ico, /robots.txt, /sse, /api/*, ...). They fall through to
+// the /:device_key push catch-all and would otherwise log a noisy ERROR per
+// probe. An unregistered probe key gets a quiet 404 instead; a key that IS
+// registered (custom keys are honored at registration) still pushes normally.
+var wellKnownProbeKeys = map[string]struct{}{
+	".env":        {},
+	".git":        {},
+	"api":         {},
+	"events":      {},
+	"favicon.ico": {},
+	"robots.txt":  {},
+	"sitemap.xml": {},
+	"sse":         {},
+	"stream":      {},
+}
+
 // pushAPNs is the seam used by push() to deliver to APNs. Tests override it to
 // run the push pipeline offline; production keeps the real APNs client.
 var pushAPNs = func(msg *apns.PushMessage) (int, error) { return apns.Push(msg) }
@@ -82,6 +99,18 @@ func init() {
 func SetMaxBatchPushCount(count int) {
 	maxBatchPushCount = count
 }
+
+// logPushFailure logs a push failure. 404 (device not found, e.g. scanner
+// probes) is a client-side condition logged at INFO; everything else is a
+// server-side fault logged at ERROR.
+func logPushFailure(stage, deviceKey string, code int, err error) {
+	if code == 404 {
+		logger.Infof("[Push] %s not found: device_key=%s code=%d err=%v", stage, deviceKey, code, err)
+		return
+	}
+	logger.Errorf("[Push] %s failed: device_key=%s code=%d err=%v", stage, deviceKey, code, err)
+}
+
 func routeDoPush(c *fiber.Ctx) error {
 	contentType := utils.ToLower(utils.UnsafeString(c.Request().Header.ContentType()))
 	contentType = utils.ParseVendorSpecificContentType(contentType)
@@ -129,7 +158,7 @@ func routeDoPushV1(c *fiber.Ctx) error {
 
 	code, err := push(params)
 	if err != nil {
-		logger.Errorf("[Push] V1 failed: device_key=%s code=%d err=%v", deviceKey, code, err)
+		logPushFailure("V1", deviceKey, code, err)
 		return c.Status(code).JSON(failed(code, "%s", err.Error()))
 	}
 	logger.Infof("[Push] V1 success: device_key=%s code=%d", deviceKey, code)
@@ -180,7 +209,7 @@ func routeDoPushV2(c *fiber.Ctx) error {
 		logger.Infof("[Push] V2 single push: device_key=%s", deviceKey)
 		code, err := push(params)
 		if err != nil {
-			logger.Errorf("[Push] V2 single failed: device_key=%s code=%d err=%v", deviceKey, code, err)
+			logPushFailure("V2", deviceKey, code, err)
 			return c.Status(code).JSON(failed(code, "%s", err.Error()))
 		}
 		logger.Infof("[Push] V2 single success: device_key=%s code=%d", deviceKey, code)
@@ -214,8 +243,7 @@ func routeDoPushV2(c *fiber.Ctx) error {
 			result[i] = make(map[string]interface{})
 			if err != nil {
 				result[i]["message"] = err.Error()
-				logger.Errorf("[Push] V2 batch item failed: device_key=%s code=%d err=%v",
-					deviceKeys[i], code, err)
+				logPushFailure("V2 batch item", deviceKeys[i], code, err)
 			} else {
 				logger.Infof("[Push] V2 batch item success: device_key=%s code=%d",
 					deviceKeys[i], code)
@@ -314,6 +342,12 @@ func push(params map[string]interface{}) (int, error) {
 	logger.Infof("[Push] device lookup: device_key=%s", msg.DeviceKey)
 	devices, err := db.DevicesByKey(msg.DeviceKey)
 	if err != nil {
+		// Scanner probes land here with well-known names; fail quietly with
+		// 404 instead of the noisy 400 client-error path.
+		if _, probe := wellKnownProbeKeys[msg.DeviceKey]; probe {
+			logger.Infof("[Push] probe path rejected: key=%s", msg.DeviceKey)
+			return 404, fmt.Errorf("device not found")
+		}
 		logger.Errorf("[Push] device not found: device_key=%s err=%v", msg.DeviceKey, err)
 		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
