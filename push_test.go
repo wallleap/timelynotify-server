@@ -559,8 +559,8 @@ func (p probeNamedDB) DevicesByKey(key string) ([]*database.DeviceInfo, error) {
 // TestHarmonyEmptyTitleFallback covers the Huawei V3 title requirement: the
 // notification must carry a non-empty title, or the message is accepted
 // (hmsCode=0) but silently not displayed. Bark pushes often carry body only
-// (V1 path style), so an empty title must fall back to the body text; an
-// explicit title is preserved untouched.
+// (V1 path style), so an empty title falls back to the generic DEFAULT_TITLE;
+// an explicit title is preserved untouched.
 func TestHarmonyEmptyTitleFallback(t *testing.T) {
 	registerHarmonyUnderTestKey(t, "harmony-title-fallback-token")
 
@@ -577,8 +577,8 @@ func TestHarmonyEmptyTitleFallback(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("body-only push should succeed, got %d", res.StatusCode)
 	}
-	if gotTitle != "qqqqq" {
-		t.Fatalf("empty title should fall back to body, got %q", gotTitle)
+	if gotTitle != DEFAULT_TITLE {
+		t.Fatalf("empty title should fall back to %q, got %q", DEFAULT_TITLE, gotTitle)
 	}
 	if gotBody != "qqqqq" {
 		t.Fatalf("body should stay %q, got %q", "qqqqq", gotBody)
