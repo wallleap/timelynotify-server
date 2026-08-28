@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -514,5 +515,163 @@ func TestPushUnregisteredDevice(t *testing.T) {
 	}
 	if called {
 		t.Fatal("APNs must not be reached for an unknown device key")
+	}
+}
+
+// overridePushHarmony swaps the Harmony push seam for one test and restores
+// the original afterwards so multi-platform tests don't leak state into siblings.
+func overridePushHarmony(t *testing.T, pushFn func(tokens []string, title, body, data string, actionType int) (int, int, error)) {
+	t.Helper()
+	orig := pushHarmony
+	pushHarmony = pushFn
+	t.Cleanup(func() { pushHarmony = orig })
+}
+
+// registerHarmonyUnderTestKey adds a harmony record under the test key so the
+// multi-platform fan-out tests have a second target alongside the iOS record
+// that TestMain installs. The harmony token is cleared on cleanup so
+// subsequent tests see the original iOS-only state.
+func registerHarmonyUnderTestKey(t *testing.T, token string) {
+	t.Helper()
+	if _, err := db.SaveDeviceInfo(&database.DeviceInfo{
+		Key:      key,
+		Token:    token,
+		Platform: "harmony",
+	}); err != nil {
+		t.Fatalf("register harmony failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.ClearDeviceTokenByKeyAndPlatform(key, "harmony")
+	})
+}
+
+// TestPushMultiPlatformFanOut covers the core multi-platform invariant: when
+// a device_key has both ios and harmony records, a single push fans out to
+// both channels. The HTTP response is 200 if any delivery succeeds.
+func TestPushMultiPlatformFanOut(t *testing.T) {
+	const harmonyTok = "harmony-fanout-token"
+	registerHarmonyUnderTestKey(t, harmonyTok)
+
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	var harmonyCalls int32
+	var harmonyTokens []string
+	var tokensMu sync.Mutex
+	overridePushHarmony(t, func(tokens []string, _, _, _ string, _ int) (int, int, error) {
+		atomic.AddInt32(&harmonyCalls, 1)
+		tokensMu.Lock()
+		harmonyTokens = append(harmonyTokens, tokens...)
+		tokensMu.Unlock()
+		return 200, 0, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hi"}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("multi-platform push should succeed, got %d", res.StatusCode)
+	}
+	if apnsCalls != 1 {
+		t.Errorf("APNs should be called once, got %d", apnsCalls)
+	}
+	if got := atomic.LoadInt32(&harmonyCalls); got != 1 {
+		t.Errorf("Harmony should be called once, got %d", got)
+	}
+	tokensMu.Lock()
+	if len(harmonyTokens) != 1 || harmonyTokens[0] != harmonyTok {
+		t.Errorf("harmony token mismatch, got %v", harmonyTokens)
+	}
+	tokensMu.Unlock()
+}
+
+// TestPushMultiPlatformPlatformOverride covers explicit platform targeting:
+// when the request body specifies platform=harmony, only the harmony record is
+// pushed even if an iOS record exists for the same key.
+func TestPushMultiPlatformPlatformOverride(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-override-token")
+
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	var harmonyCalls int32
+	overridePushHarmony(t, func([]string, string, string, string, int) (int, int, error) {
+		atomic.AddInt32(&harmonyCalls, 1)
+		return 200, 0, nil
+	})
+
+	body := `{"device_key":"` + key + `","body":"hi","platform":"harmony"}`
+	res := doPush(t, "POST", "/push", body, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("platform-targeted push should succeed, got %d", res.StatusCode)
+	}
+	if apnsCalls != 0 {
+		t.Errorf("APNs must NOT be called when platform=harmony, got %d", apnsCalls)
+	}
+	if got := atomic.LoadInt32(&harmonyCalls); got != 1 {
+		t.Errorf("Harmony should be called once, got %d", got)
+	}
+}
+
+// TestPushMultiPlatformSkipClearedToken covers the dead-token skip: when a
+// record's token was cleared (e.g. after a prior BadDeviceToken), it is not
+// pushed, so only the still-valid platform receives the message.
+func TestPushMultiPlatformSkipClearedToken(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-skip-token")
+
+	if err := db.ClearDeviceTokenByKeyAndPlatform(key, "ios"); err != nil {
+		t.Fatalf("clear ios token failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.SaveDeviceInfo(&database.DeviceInfo{
+			Key:      key,
+			Token:    deviceToken,
+			Platform: "ios",
+		})
+	})
+
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	var harmonyCalls int32
+	overridePushHarmony(t, func([]string, string, string, string, int) (int, int, error) {
+		atomic.AddInt32(&harmonyCalls, 1)
+		return 200, 0, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hi"}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("push to the surviving platform should succeed, got %d", res.StatusCode)
+	}
+	if apnsCalls != 0 {
+		t.Errorf("APNs must NOT be called for cleared iOS token, got %d", apnsCalls)
+	}
+	if got := atomic.LoadInt32(&harmonyCalls); got != 1 {
+		t.Errorf("Harmony should still be called once, got %d", got)
+	}
+}
+
+// TestPushMultiPlatformAllFail covers the all-failed case: when every target
+// delivery fails, the HTTP response surfaces the failure code (500).
+func TestPushMultiPlatformAllFail(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-allfail-token")
+
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		return 502, errors.New("BadGateway")
+	})
+	overridePushHarmony(t, func([]string, string, string, string, int) (int, int, error) {
+		return 500, 80200003, errors.New("harmony error")
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hi"}`, true)
+	if res.StatusCode != 500 {
+		t.Fatalf("all-failed push should surface 500, got %d", res.StatusCode)
 	}
 }

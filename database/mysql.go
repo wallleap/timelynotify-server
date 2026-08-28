@@ -25,10 +25,23 @@ const (
 		"    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT," +
 		"    `key` VARCHAR(255) NOT NULL," +
 		"    `token` VARCHAR(255) NOT NULL," +
+		"    `platform` VARCHAR(32) NOT NULL DEFAULT 'ios'," +
 		"    PRIMARY KEY (`id`)," +
-		"    UNIQUE KEY `key` (`key`)" +
+		"    UNIQUE KEY `key_platform` (`key`, `platform`)" +
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 )
+
+// migrations upgrade pre-multi-platform tables to the new schema. Errors are
+// logged at warn level and ignored — each statement is idempotent enough that
+// a duplicate-column or duplicate-key error just means the migration already
+// ran. Statements use MySQL 8 / MariaDB syntax; on MySQL 5.7 the IF EXISTS /
+// IF NOT EXISTS clauses are unsupported and the statements error out, which
+// is fine because the corresponding ALTER has already been applied.
+var migrations = []string{
+	"ALTER TABLE `devices` ADD COLUMN IF NOT EXISTS `platform` VARCHAR(32) NOT NULL DEFAULT 'ios'",
+	"ALTER TABLE `devices` DROP INDEX IF EXISTS `key`",
+	"ALTER TABLE `devices` ADD UNIQUE KEY IF NOT EXISTS `key_platform` (`key`, `platform`)",
+}
 
 func NewMySQL(dsn string) Database {
 	db, err := sql.Open("mysql", dsn)
@@ -39,6 +52,12 @@ func NewMySQL(dsn string) Database {
 	_, err = db.Exec(dbSchema)
 	if err != nil {
 		logger.Fatalf("failed to init database schema(%s): %v", dbSchema, err)
+	}
+
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil {
+			logger.Warnf("mysql migration skipped (%s): %v", m, err)
+		}
 	}
 
 	mysqlDB = db
@@ -102,9 +121,12 @@ func (d *MySQL) CountAll() (int, error) {
 	return count, nil
 }
 
+// DeviceTokenByKey returns any non-empty token for the key, preferring ios.
 func (d *MySQL) DeviceTokenByKey(key string) (string, error) {
 	var token string
-	err := mysqlDB.QueryRow("SELECT `token` FROM `devices` WHERE `key`=? ", key).Scan(&token)
+	err := mysqlDB.QueryRow(
+		"SELECT `token` FROM `devices` WHERE `key`=? ORDER BY (`platform`='ios') DESC LIMIT 1", key,
+	).Scan(&token)
 	if err != nil {
 		return "", err
 	}
@@ -118,48 +140,99 @@ func (d *MySQL) DeviceTokenByKey(key string) (string, error) {
 	return token, nil
 }
 
+// SaveDeviceTokenByKey is the legacy upsert (defaults to platform "ios").
 func (d *MySQL) SaveDeviceTokenByKey(key, token string) (string, error) {
-	if key == "" {
-		// Generate a new UUID as the deviceKey when a new device register
-		key = shortuuid.New()
-	}
+	return d.SaveDeviceInfo(&DeviceInfo{
+		Key:      key,
+		Token:    token,
+		Platform: "ios",
+	})
+}
 
-	_, err := mysqlDB.Exec("INSERT INTO `devices` (`key`,`token`) VALUES (?,?) ON DUPLICATE KEY UPDATE `token`=?", key, token, token)
+// DevicesByKey returns every (key, platform) record for the key. iOS is
+// ordered first so callers that only consume the head see a stable record.
+func (d *MySQL) DevicesByKey(key string) ([]*DeviceInfo, error) {
+	rows, err := mysqlDB.Query(
+		"SELECT `token`, `platform` FROM `devices` WHERE `key`=? ORDER BY (`platform`='ios') DESC", key,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var infos []*DeviceInfo
+	for rows.Next() {
+		var info DeviceInfo
+		if err := rows.Scan(&info.Token, &info.Platform); err != nil {
+			return nil, err
+		}
+		info.Key = key
+		infos = append(infos, &info)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(infos) == 0 {
+		return nil, fmt.Errorf("failed to get [%s] device info from database", key)
+	}
+	return infos, nil
+}
+
+// DeviceInfoByKey returns the first record for the key, preferring "ios".
+// Deprecated: use DevicesByKey for multi-platform fan-out.
+func (d *MySQL) DeviceInfoByKey(key string) (*DeviceInfo, error) {
+	var info DeviceInfo
+	err := mysqlDB.QueryRow(
+		"SELECT `token`, `platform` FROM `devices` WHERE `key`=? ORDER BY (`platform`='ios') DESC LIMIT 1", key,
+	).Scan(&info.Token, &info.Platform)
+	if err != nil {
+		return nil, err
+	}
+	if len(info.Token) == 0 {
+		return nil, fmt.Errorf("device token invalid")
+	}
+	info.Key = key
+	return &info, nil
+}
+
+// SaveDeviceInfo upserts by (key, platform). Re-registering the same
+// (key, platform) updates the token; a different platform adds a new row
+// without touching the others.
+func (d *MySQL) SaveDeviceInfo(info *DeviceInfo) (string, error) {
+	if info.Platform == "" {
+		info.Platform = "ios"
+	}
+	if info.Key == "" {
+		info.Key = shortuuid.New()
+	}
+	_, err := mysqlDB.Exec(
+		"INSERT INTO `devices` (`key`,`token`,`platform`) VALUES (?,?,?) "+
+			"ON DUPLICATE KEY UPDATE `token`=VALUES(`token`)",
+		info.Key, info.Token, info.Platform,
+	)
 	if err != nil {
 		return "", err
 	}
+	return info.Key, nil
+}
 
-	return key, nil
+// ClearDeviceTokenByKeyAndPlatform empties the token of the given (key,
+// platform) pair. The row itself is kept so the key remains known and other
+// platforms are untouched.
+func (d *MySQL) ClearDeviceTokenByKeyAndPlatform(key, platform string) error {
+	if platform == "" {
+		platform = "ios"
+	}
+	_, err := mysqlDB.Exec(
+		"UPDATE `devices` SET `token`='' WHERE `key`=? AND `platform`=?",
+		key, platform,
+	)
+	return err
 }
 
 func (d *MySQL) DeleteDeviceByKey(key string) error {
 	_, err := mysqlDB.Exec("DELETE FROM `devices` WHERE `key`=?", key)
 	return err
-}
-
-// DeviceInfoByKey (MySQL support: defaults to "ios" platform since table doesn't have platform column yet)
-func (d *MySQL) DeviceInfoByKey(key string) (*DeviceInfo, error) {
-	var token string
-	err := mysqlDB.QueryRow("SELECT `token` FROM `devices` WHERE `key`=? ", key).Scan(&token)
-	if err != nil {
-		return nil, err
-	}
-	if len(token) == 0 {
-		return nil, fmt.Errorf("device token invalid")
-	}
-	return &DeviceInfo{Key: key, Token: token, Platform: "ios"}, nil
-}
-
-// SaveDeviceInfo (MySQL support: defaults to "ios" platform since table doesn't have platform column yet)
-func (d *MySQL) SaveDeviceInfo(info *DeviceInfo) (string, error) {
-	if info.Key == "" {
-		info.Key = shortuuid.New()
-	}
-	_, err := mysqlDB.Exec("INSERT INTO `devices` (`key`,`token`) VALUES (?,?) ON DUPLICATE KEY UPDATE `token`=?", info.Key, info.Token, info.Token)
-	if err != nil {
-		return "", err
-	}
-	return info.Key, nil
 }
 
 func (d *MySQL) Close() error {

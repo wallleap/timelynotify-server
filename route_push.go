@@ -312,36 +312,95 @@ func push(params map[string]interface{}) (int, error) {
 	}
 
 	logger.Infof("[Push] device lookup: device_key=%s", msg.DeviceKey)
-	deviceInfo, err := db.DeviceInfoByKey(msg.DeviceKey)
+	devices, err := db.DevicesByKey(msg.DeviceKey)
 	if err != nil {
 		logger.Errorf("[Push] device not found: device_key=%s err=%v", msg.DeviceKey, err)
 		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
 
-	platform := deviceInfo.Platform
-	if explicitPlatform, ok := msg.ExtParams["_platform"].(string); ok && explicitPlatform != "" {
-		platform = explicitPlatform
-		logger.Infof("[Push] platform override: device_key=%s explicit=%s stored=%s",
-			msg.DeviceKey, explicitPlatform, deviceInfo.Platform)
+	// Explicit `platform` param narrows delivery to one platform; without it
+	// we fan out to every (key, platform) record so a single device_key can
+	// reach both iOS and HarmonyOS devices at once.
+	explicitPlatform, _ := msg.ExtParams["_platform"].(string)
+	targets := make([]*database.DeviceInfo, 0, len(devices))
+	for _, di := range devices {
+		if di.Token == "" {
+			// Skip records whose token was cleared (e.g. after a prior
+			// BadDeviceToken). The record stays so the key remains known,
+			// but we don't push to a dead token.
+			continue
+		}
+		if explicitPlatform != "" && di.Platform != explicitPlatform {
+			continue
+		}
+		targets = append(targets, di)
+	}
+	if len(targets) == 0 {
+		logger.Warnf("[Push] no valid target: device_key=%s explicit=%s", msg.DeviceKey, explicitPlatform)
+		return 400, fmt.Errorf("no valid device token for key %s", msg.DeviceKey)
+	}
+	if explicitPlatform != "" {
+		logger.Infof("[Push] platform override: device_key=%s explicit=%s targets=%d",
+			msg.DeviceKey, explicitPlatform, len(targets))
 	} else {
-		logger.Infof("[Push] platform resolved: device_key=%s platform=%s", msg.DeviceKey, platform)
+		logger.Infof("[Push] platform resolved: device_key=%s targets=%d", msg.DeviceKey, len(targets))
 	}
 
-	if platform == "harmony" {
-		initHarmony()
-	}
-
-	msg.DeviceToken = deviceInfo.Token
-
+	// Record the push to the monitoring stream once per logical request,
+	// independent of how many platforms actually receive it.
 	gotifyPublish(&msg)
 
-	if platform == "harmony" {
-		logger.Infof("[Push] routing to HarmonyOS: device_key=%s", msg.DeviceKey)
-		return pushToHarmony(deviceInfo, &msg)
+	if len(targets) == 1 {
+		return pushToDevice(targets[0], &msg)
 	}
 
-	logger.Infof("[Push] routing to APNs: device_key=%s", msg.DeviceKey)
-	return pushToAPNs(deviceInfo, &msg)
+	logger.Infof("[Push] multi-platform fan-out: device_key=%s targets=%d", msg.DeviceKey, len(targets))
+
+	// Fan out concurrently. Succeed if any one delivery succeeds; surface
+	// the last failure code only when every target failed.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	successCount := 0
+	var lastCode int
+	var lastErr error
+	for _, di := range targets {
+		wg.Add(1)
+		go func(di *database.DeviceInfo) {
+			defer wg.Done()
+			code, err := pushToDevice(di, &msg)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				lastCode = code
+				lastErr = err
+			} else {
+				successCount++
+			}
+		}(di)
+	}
+	wg.Wait()
+	if successCount > 0 {
+		return 200, nil
+	}
+	if lastErr != nil {
+		return lastCode, lastErr
+	}
+	return 500, fmt.Errorf("all pushes failed for key %s", msg.DeviceKey)
+}
+
+// pushToDevice dispatches a single push to the platform-specific channel.
+// The PushMessage is shallow-copied per call so concurrent fan-out writes
+// distinct DeviceToken fields without racing on the shared struct.
+func pushToDevice(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+	m := *msg
+	m.DeviceToken = deviceInfo.Token
+	if deviceInfo.Platform == "harmony" {
+		initHarmony()
+		logger.Infof("[Push] routing to HarmonyOS: device_key=%s", m.DeviceKey)
+		return pushToHarmony(deviceInfo, &m)
+	}
+	logger.Infof("[Push] routing to APNs: device_key=%s", m.DeviceKey)
+	return pushToAPNs(deviceInfo, &m)
 }
 
 // pushToAPNs sends notification via APNs
@@ -349,8 +408,9 @@ func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, er
 	code, err := pushAPNs(msg)
 
 	if code == 410 || (code == 400 && strings.Contains(err.Error(), "BadDeviceToken")) {
-		logger.Warnf("[Push] APNs invalid token, clearing: device_key=%s code=%d", msg.DeviceKey, code)
-		_, _ = db.SaveDeviceTokenByKey(msg.DeviceKey, "")
+		logger.Warnf("[Push] APNs invalid token, clearing: device_key=%s platform=%s code=%d",
+			msg.DeviceKey, deviceInfo.Platform, code)
+		_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, deviceInfo.Platform)
 	}
 	if err != nil {
 		logger.Errorf("[Push] APNs failed: device_key=%s code=%d err=%v", msg.DeviceKey, code, err)
@@ -390,9 +450,9 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 
 	if err != nil {
 		if hmsCode == 80200001 {
-			logger.Warnf("[Push] HarmonyOS invalid token, clearing: device_key=%s hmsCode=%d",
-				msg.DeviceKey, hmsCode)
-			_, _ = db.SaveDeviceTokenByKey(msg.DeviceKey, "")
+			logger.Warnf("[Push] HarmonyOS invalid token, clearing: device_key=%s platform=%s hmsCode=%d",
+				msg.DeviceKey, deviceInfo.Platform, hmsCode)
+			_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, deviceInfo.Platform)
 		}
 		logger.Errorf("[Push] HarmonyOS failed: device_key=%s hmsCode=%d err=%v",
 			msg.DeviceKey, hmsCode, err)
