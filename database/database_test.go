@@ -1,10 +1,54 @@
 package database
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"go.etcd.io/bbolt"
 )
+
+// putRawLegacyInfo writes a raw legacy "info:<key>" record (no platform
+// suffix) carrying the given DeviceInfo JSON body. This simulates a
+// pre-multi-platform database where SaveDeviceInfo stored every platform
+// under the legacy "info:<key>" key. It is used to exercise the legacy
+// fallback and cleanup paths in DevicesByKey / SaveDeviceInfo.
+func putRawLegacyInfo(t *testing.T, key string, info *DeviceInfo) {
+	t.Helper()
+	raw, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal legacy info: %v", err)
+	}
+	if err := db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(bucketName))
+		if bucket == nil {
+			return fmt.Errorf("bucket not found")
+		}
+		return bucket.Put([]byte(infoPrefix+key), raw)
+	}); err != nil {
+		t.Fatalf("put raw legacy info:<key> failed: %v", err)
+	}
+}
+
+// legacyInfoExists reports whether a raw legacy "info:<key>" record is still
+// present in the bucket, returning its raw JSON value (or nil when absent).
+func legacyInfoExists(t *testing.T, key string) []byte {
+	t.Helper()
+	var got []byte
+	if err := db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(bucketName))
+		if bucket == nil {
+			return fmt.Errorf("bucket not found")
+		}
+		got = bucket.Get([]byte(infoPrefix + key))
+		return nil
+	}); err != nil {
+		t.Fatalf("view legacy info:<key> failed: %v", err)
+	}
+	return got
+}
 
 // TestMemBaseCRUD exercises the in-memory database used in tests/serverless-adjacent
 // scenarios. MemBase holds a single package-level key with per-platform records.
@@ -808,5 +852,103 @@ func TestMemBase_AllTokensCleared(t *testing.T) {
 	// DeviceTokenByKey (legacy) must error rather than return "".
 	if _, err := db.DeviceTokenByKey(cacheKey); err == nil {
 		t.Fatal("DeviceTokenByKey must error when all tokens are cleared, got nil")
+	}
+}
+
+// TestBbolt_DevicesByKeyDedupesLegacyHarmonyInfo pins the bug where a stale
+// legacy "info:<key>" record whose JSON body carries Platform="harmony"
+// was surfaced by DevicesByKey as a SECOND harmony record on top of the
+// new-format "info:<key>:harmony" record, causing the multi-platform
+// push fan-out to deliver the same notification twice.
+//
+// Root cause: the legacy "info:<key>" fallback only checked whether an ios
+// record had already been seen, and then appended the legacy record with
+// whatever Platform its JSON carried (harmony included) — duplicating the
+// harmony platform. The fallback must dedupe against the record's actual
+// platform, not a hardcoded "ios".
+func TestBbolt_DevicesByKeyDedupesLegacyHarmonyInfo(t *testing.T) {
+	dir := t.TempDir()
+	store := NewBboltdb(filepath.Join(dir, "data"))
+
+	const key = "stale-legacy-harmony"
+	// Real new-format harmony record.
+	if _, err := store.SaveDeviceInfo(&DeviceInfo{Key: key, Token: "h-tok", Platform: "harmony"}); err != nil {
+		t.Fatalf("SaveDeviceInfo(harmony) failed: %v", err)
+	}
+	// Stale legacy "info:<key>" with Platform="harmony" in its JSON body,
+	// left behind by the pre-multi-platform SaveDeviceInfo (which wrote
+	// "info:<key>" for every platform and only deleted it for ios).
+	putRawLegacyInfo(t, key, &DeviceInfo{Key: key, Token: "h-tok", Platform: "harmony"})
+
+	infos, err := store.DevicesByKey(key)
+	if err != nil {
+		t.Fatalf("DevicesByKey failed: %v", err)
+	}
+	if len(infos) != 1 {
+		var seen []string
+		for _, in := range infos {
+			seen = append(seen, in.Platform+":"+in.Token)
+		}
+		t.Fatalf("want 1 harmony record (legacy deduped), got %d: %v", len(infos), seen)
+	}
+	if infos[0].Platform != "harmony" || infos[0].Token != "h-tok" {
+		t.Fatalf("want single harmony record 'h-tok', got %+v", infos[0])
+	}
+}
+
+// TestBbolt_DevicesByKeyLegacyHarmonyOnly verifies the legacy fallback
+// still surfaces a genuine harmony-only legacy "info:<key>" record (no
+// new-format counterpart) so old deployments are not stranded — the
+// dedupe must skip the legacy record only when its platform was already
+// seen, not drop it unconditionally.
+func TestBbolt_DevicesByKeyLegacyHarmonyOnly(t *testing.T) {
+	dir := t.TempDir()
+	store := NewBboltdb(filepath.Join(dir, "data"))
+
+	const key = "legacy-harmony-only"
+	// Only a legacy "info:<key>" with Platform="harmony", no new-format record.
+	putRawLegacyInfo(t, key, &DeviceInfo{Key: key, Token: "h-tok", Platform: "harmony"})
+
+	infos, err := store.DevicesByKey(key)
+	if err != nil {
+		t.Fatalf("DevicesByKey failed: %v", err)
+	}
+	if len(infos) != 1 || infos[0].Platform != "harmony" || infos[0].Token != "h-tok" {
+		t.Fatalf("want single legacy harmony record 'h-tok', got %+v", infos)
+	}
+}
+
+// TestBbolt_SaveDeviceInfoCleansStaleLegacyInfoKey pins the write-path half
+// of the duplicate-push fix: re-registering any platform (harmony included)
+// must delete a pre-existing stale legacy "info:<key>" record so that a
+// later DevicesByKey cannot double-count it. Before the fix the legacy
+// record was only deleted for ios registrations, leaving harmony devices
+// that were registered both before and after the multi-platform refactor
+// with two harmony records (one new-format, one stale legacy).
+func TestBbolt_SaveDeviceInfoCleansStaleLegacyInfoKey(t *testing.T) {
+	dir := t.TempDir()
+	store := NewBboltdb(filepath.Join(dir, "data"))
+
+	const key = "stale-legacy-cleanup"
+	// Pre-existing stale legacy "info:<key>" (platform harmony in body),
+	// as written by the pre-multi-platform SaveDeviceInfo.
+	putRawLegacyInfo(t, key, &DeviceInfo{Key: key, Token: "h-tok", Platform: "harmony"})
+
+	// Re-register harmony via the new API; this must delete the stale
+	// legacy "info:<key>" so DevicesByKey cannot double-count it.
+	if _, err := store.SaveDeviceInfo(&DeviceInfo{Key: key, Token: "h-tok2", Platform: "harmony"}); err != nil {
+		t.Fatalf("SaveDeviceInfo(harmony) failed: %v", err)
+	}
+
+	if got := legacyInfoExists(t, key); got != nil {
+		t.Fatalf("stale legacy info:<key> should have been deleted, still present: %s", string(got))
+	}
+
+	infos, err := store.DevicesByKey(key)
+	if err != nil {
+		t.Fatalf("DevicesByKey failed: %v", err)
+	}
+	if len(infos) != 1 || infos[0].Platform != "harmony" || infos[0].Token != "h-tok2" {
+		t.Fatalf("want single harmony record 'h-tok2', got %+v", infos)
 	}
 }

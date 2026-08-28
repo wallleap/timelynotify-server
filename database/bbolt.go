@@ -182,17 +182,24 @@ func (d *BboltDB) DevicesByKey(key string) ([]*DeviceInfo, error) {
 			seen[plat] = struct{}{}
 		}
 
-		// Legacy info:<key> only if no new ios record was found.
-		if _, ok := seen["ios"]; !ok {
-			if bs := bucket.Get([]byte(infoPrefix + key)); bs != nil {
-				var info DeviceInfo
-				if err := json.Unmarshal(bs, &info); err == nil {
-					info.Key = key
-					if info.Platform == "" {
-						info.Platform = "ios"
-					}
+		// Legacy "info:<key>" record (pre-multi-platform schema, no platform
+		// suffix in the bucket key). Surface it only when its platform
+		// (defaulting to "ios" when the JSON body omits it) has not already
+		// been delivered by a new-format record above; otherwise a stale
+		// legacy record whose body carries Platform="harmony" would be
+		// appended as a second harmony entry alongside the new-format
+		// "info:<key>:harmony" record and the multi-platform fan-out would
+		// push the same device twice.
+		if bs := bucket.Get([]byte(infoPrefix + key)); bs != nil {
+			var info DeviceInfo
+			if err := json.Unmarshal(bs, &info); err == nil {
+				info.Key = key
+				if info.Platform == "" {
+					info.Platform = "ios"
+				}
+				if _, dup := seen[info.Platform]; !dup {
 					infos = append(infos, &info)
-					seen["ios"] = struct{}{}
+					seen[info.Platform] = struct{}{}
 				}
 			}
 		}
@@ -258,14 +265,18 @@ func (d *BboltDB) SaveDeviceInfo(info *DeviceInfo) (string, error) {
 			return err
 		}
 
+		// Remove any legacy "info:<key>" record (pre-multi-platform schema)
+		// so a re-registration on any platform cannot leave a stale legacy
+		// entry that DevicesByKey would double-count alongside the
+		// new-format "info:<key>:<platform>" record just written above.
+		_ = bucket.Delete([]byte(infoPrefix + info.Key))
+
 		// For iOS, also maintain the legacy bare-key token record so old
-		// deployments that only read "<key>" keep working, and remove any
-		// legacy "info:<key>" record so CountAll does not double-count.
+		// deployments that only read "<key>" keep working.
 		if info.Platform == "ios" {
 			if err := bucket.Put([]byte(info.Key), []byte(info.Token)); err != nil {
 				return err
 			}
-			_ = bucket.Delete([]byte(infoPrefix + info.Key))
 		}
 		return nil
 	})
