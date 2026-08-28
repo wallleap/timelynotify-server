@@ -2,7 +2,7 @@
 
 TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了以下能力：
 
-- **原生双平台推送**：同时支持 iOS（APNs）和 HarmonyOS（华为 Push Kit）原生推送，统一 API 自动路由
+- **原生双平台推送**：同时支持 iOS（APNs）和 HarmonyOS（华为 Push Kit）原生推送，统一 API 自动路由。可以实现一个 push url 同时向两个平台发送消息。
 - **Gotify 兼容监控**：每一条推送都会进入 Gotify 风格的监控流，供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 消费
 - **MCP 接口**：AI 代理可直接通过 MCP 协议调用推送
 

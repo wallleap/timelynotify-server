@@ -82,4 +82,4 @@ gotify_token: <上面拿到的 client token>
   并返回 `401`，请改用 `POST /push` 或换设备 key。全局 gotify 接口（`/version`、`/message`、`/stream`）已移除。
 - WebSocket 心跳：服务器 45s 发一次 ping；客户端 ping（桥每 20s）会刷新读超时（60s），
   静默失效的连接会被回收。WebSocket 默认放行所有 Origin（桥不发 Origin）。
-- 平台路由：推送消息会按设备注册时的 `platform` 字段自动路由到 APNs（iOS）或华为 Push Kit（HarmonyOS）。监控流不区分平台，所有推送都会进入统一的消息流。
+- 平台扇出：同一个 `device_key` 可同时绑定 iOS 与鸿蒙记录，推送时默认扇出到该 key 下所有有效平台（任一成功即 200）。监控流**不区分平台**，每次逻辑推送只记录一次，与实际投递的平台数无关；iOS/HarmonyOS 侧投递成败不影响监控流（`gotifyPublish` 在扇出前即执行）。

@@ -6,7 +6,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 
 - 入口：根目录 `package main`（`main.go`），urfave/cli v2 定义参数（`BARK_SERVER_*` 环境变量），fiber.New 构建应用。
 - 模块路径：`github.com/wallleap/timelynotify-server`，go.mod `go 1.25.5`（README 里的 "Go 1.18+" 已过时，以 go.mod 为准）。
-- 推送链路：HTTP → `routeDoPush`（JSON→V2 / 其他→V1）→ `push()` → `db.DeviceInfoByKey` → 按 `platform` 分发 → `gotifyPublish`（监控流）→ `pushToAPNs` / `pushToHarmony`。
+- 推送链路：HTTP → `routeDoPush`（JSON→V2 / 其他→V1）→ `push()` → `db.DevicesByKey`（返回该 key 下所有 `(key, platform)` 记录）→ 过滤空 token、按 `_platform` 显式收窄或全平台并发扇出 → `gotifyPublish`（监控流，单次）→ `pushToDevice` → `pushToAPNs` / `pushToHarmony`。单目标走原路径；多目标用 `sync.WaitGroup` 并发，**任一成功即 200**，全部失败才 500。
 
 ## Commands
 
@@ -40,7 +40,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 - CLI 参数风格：urfave/cli 的 `StringFlag/BoolFlag/IntFlag`，`EnvVars: []string{"BARK_SERVER_*"}`，大小写转换参数名。
 - Docker 运行用户是 `app`（uid 1000，非 root），`/etc` 运行时不可写；**entrypoint 不要做改 `/etc/localtime` 之类的运行时写操作**（曾在 `set -e` 下 `ln -sf` 因 target 已存在而 `File exists` 导致容器启动失败退出 1），时区在 Dockerfile 构建期烘焙、`BARK_SERVER_DATA_DIR=/data` 且 `/data` 已 chown 给 `app`。
 - gotifycompat 的降级原则：存储不可用 → 内存降级，日志记录，**绝不致命**（参考 `service.go` Init）。
-- 设备注册支持 `platform` 字段（`ios` 或 `harmony`），默认 `ios`；推送时根据存储的 platform 自动选择通道，也可在推送请求体中通过 `platform` 字段临时覆盖。
+- 设备注册支持 `platform` 字段（`ios` 或 `harmony`），默认 `ios`。**同一 `device_key` 可同时绑定 iOS 与鸿蒙两条记录**（数据库按 `(key, platform)` 唯一约束，见 `database/database.go`）；推送时默认**扇出到该 key 下所有有效平台**，任一成功即返回 200。推送请求体可带 `platform` 字段**收窄**到指定平台（仅推该平台记录，不再覆盖到无关平台）。失效 token 清理用 `ClearDeviceTokenByKeyAndPlatform`（按平台定向），**不可**用 `SaveDeviceTokenByKey(key, "")`（默认 `ios`，会跨平台误清）。
 - `harmony/harmony_certs.go` 是华为 Push Kit 凭证配置文件，包含 `keyID`、`subAccount`、`projectID`、`privateKey` 四个变量，**和 `apns_certs.go` 一样是真实的凭证**。
 - 华为 Push Kit V3 场景化消息：请求体为 `{payload:{notification},target:{token},pushOptions}`，HTTP 头必带 `push-type:0`（Alert）。`notification.clickAction` 是对象 `{actionType:0|1}`（0=进首页、1=进内页），**不是** V1 的 `click_action` 字符串（`launch`/`banner`/`page`）。`category` 默认 `SUBSCRIPTION`（订阅类，服务通讯）、`foregroundShow` 默认 `true`、`pushOptions.ttl` 默认 86400。**`SUBSCRIPTION` 等服务通讯类 category 须先在 AGC 申请「通知消息自分类权益」并通过审核**，否则消息会被华为降级为 `MARKETING`（资讯营销类），受每设备每日 2/5 条频控且自定义铃声失效；若暂未申请权益，临时把 `harmony/client.go` 的 `defaultCategory` 改回 `MARKETING` 即可零门槛发送。Bark `level` 字段是 APNs 概念，V3 无直接对应，统一用 `actionType=0`（点击进应用首页）；V3 通知展示样式由系统按 `category` 与前台状态决定，不再有 V1 的 launch/banner/page 之分。
 

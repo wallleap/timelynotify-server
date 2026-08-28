@@ -9,6 +9,7 @@
 | 功能 | 说明 | 文档 |
 | ----- | ----------- | ---- |
 | 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；`level` 字段映射到华为 `click_action` | [API_V2.md](docs/API_V2.md) |
+| 多平台 fan-out（同一 device_key 多端并存） | 数据库按 `(key, platform)` 唯一约束，**同一 `device_key` 可同时绑定 iOS 与鸿蒙记录**；推送时默认扇出到该 key 下所有有效平台（任一成功即 200，全部失败才 500），推送请求体的 `platform` 字段语义从"覆盖存储平台"改为"**收窄**到指定平台"；失效 token 清理改为按平台定向 `ClearDeviceTokenByKeyAndPlatform`，修复跨平台误清 bug | [TOKENS.md](docs/TOKENS.md) |
 | Gotify 兼容监控及其它消息相关接口 | 设备级 `GET /<device_key>/version`、`GET /<device_key>/message`、`GET /<device_key>/stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | MCP 推送 | `POST /mcp`、`POST /mcp/:device_key`，AI 代理可通过 Model Context Protocol 直接发推送 | [MCP.md](docs/MCP.md) |
 | Basic Auth | 可选 `--user/--password`，`/ping` `/register` `/healthz` `/info` 全局白名单 + 设备级 `/:device_key/version` `/:device_key/message` `/:device_key/stream` 白名单（`/info` 无凭据显示基础信息，带凭据才含设备数） | |

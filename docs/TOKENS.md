@@ -33,6 +33,7 @@ curl -X POST http://<host>:18080/register \
   - 用户注册时**指定** `key`（如 `mydemo`）：服务端原样保存。
   - 用户**不指定**：服务端用 `shortuuid` 生成一个随机 key（`database/bbolt.go`、`database/mysql.go` 中的 `SaveDeviceTokenByKey`）。
 - **用在哪**：推送 URL 的路径段与 `device_key` 参数，例如 `GET /mydemo/标题/内容` 或 `POST /push` 的 JSON 里 `"device_key": "mydemo"`；也是旧版兼容推送路由 `/:device_key` 的凭证。注册成功响应会返回 `key`、`device_key` 和 `platform`（新增）字段。
+- **多平台共存**：**同一个 `device_key` 可以同时绑定 iOS 与鸿蒙设备**——iPhone 用 `platform=ios` 注册、鸿蒙手机用 `platform=harmony` 注册到同一个 key，数据库按 `(key, platform)` 唯一约束并存。推送时服务端**默认扇出到该 key 下所有有效平台**（iPhone 和鸿蒙手机同时收到），任一平台投递成功即返回 200；若只想推某一端，在推送请求体带 `"platform": "ios"` 或 `"harmony"` **收窄**到指定平台。注意：失效 token 清理是按平台定向的（`ClearDeviceTokenByKeyAndPlatform`），不会因为一端失效而连累另一端。
 - **⚠️ 安全提示**：**device_key 就是推送凭证**——任何人拿到你的 Bark URL（含 key）就能向你的设备推送。不要在公开渠道晒 Bark 推送 URL。它是"设备级"凭证，与 client token 无关。
 
 ## 4. client token（gotify 兼容接口令牌）

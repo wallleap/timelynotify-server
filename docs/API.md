@@ -36,7 +36,7 @@
 | body | string | Notification content |
 | device_key | string | The key for each device |
 | device_keys (optional) | array | Used for batch pushing |
-| platform (optional) | string | Override the device's registered platform: `ios` or `harmony` |
+| platform (optional) | string | Narrow delivery to one platform: `ios` or `harmony`. Without it, the push fans out to every platform bound to the `device_key`. |
 | level (optional) | string | `'critical'`, `'active'`, `'timeSensitive'`, `'passive'` |
 | volume (optional) | string | The ringtone volume for critical alert notification. |
 | badge (optional) | integer | The number displayed next to App icon ([Apple Developer](https://developer.apple.com/documentation/usernotifications/unnotificationcontent/1649864-badge)) |
@@ -55,7 +55,7 @@
 | action (optional) | string | Set to "none", tap notifications do nothing |
 | delete (optional) | string | Must be `1`. Silent push: delivers a background push and is not shown on screen |
 
-> **Platform routing**: When a device is registered with `platform: harmony`, the server automatically routes push requests through the Huawei Push Kit API. You can also override the platform per-request by including `"platform": "harmony"` or `"platform": "ios"` in the push body. The `level` field is mapped to Huawei `click_action` as follows: when `level` is not specified, the default is `launch` (full-screen notification); `critical`/`timeSensitive` → `launch`; `active` → `banner`; all other values (e.g. `passive`) → `page`.
+> **Platform fan-out**: A single `device_key` can hold both an iOS record and a HarmonyOS record at the same time (the database keys on `(device_key, platform)`). By default a push **fans out to every valid platform bound to the key** — both devices receive the notification, and the request returns 200 if any platform delivery succeeds (failures are logged and surfaced via the gotify monitoring stream). To narrow delivery to one platform, include `"platform": "ios"` or `"platform": "harmony"` in the push body — this **narrows** rather than overrides: it only selects which bound records to deliver to, it does not rewrite the stored platform. Tokens reported invalid (APNs `BadDeviceToken` / Huawei `80200001`) are cleared per-platform via `ClearDeviceTokenByKeyAndPlatform`, so a dead token on one platform never clobbers the other. The `level` field is mapped to Huawei `click_action` as follows: when `level` is not specified, the default is `launch` (full-screen notification); `critical`/`timeSensitive` → `launch`; `active` → `banner`; all other values (e.g. `passive`) → `page`.
 
 ### curl
 
@@ -76,7 +76,7 @@ curl -X "POST" "http://127.0.0.1:18080/push" \
 
 ### HarmonyOS Push (curl)
 
-推送鸿蒙设备与 iOS 设备使用完全相同的 API。服务端会根据设备注册时的 `platform` 字段自动选择通道，无需客户端额外指定。
+推送鸿蒙设备与 iOS 设备使用完全相同的 API。**同一个 `device_key` 可同时绑定 iOS 与鸿蒙记录**，推送时默认扇出到该 key 下所有有效平台（两端都收到），任一平台成功即返回 200；若只想推某一端，在推送体里带 `"platform": "ios"` 或 `"harmony"` 收窄即可。
 
 ```sh
 # 1. 先注册鸿蒙设备
