@@ -14,7 +14,7 @@ var (
 // serves. The mutex guards concurrent register/clear paths that tests may run
 // in parallel.
 var (
-	cacheMu        sync.RWMutex
+	cacheMu         sync.RWMutex
 	cacheByPlatform = make(map[string]*DeviceInfo)
 )
 

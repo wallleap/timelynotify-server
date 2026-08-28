@@ -18,6 +18,7 @@ import (
 )
 
 const DEFAULT_TITLE = "订阅通知"
+
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 

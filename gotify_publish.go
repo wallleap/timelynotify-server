@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	"github.com/wallleap/timelynotify-server/apns"
 	"github.com/mritd/logger"
+	"github.com/wallleap/timelynotify-server/apns"
 )
 
 // gotifyPublish mirrors a resolved push into the gotify-compatible
@@ -27,7 +27,7 @@ func gotifyPublish(msg *apns.PushMessage) {
 
 	title := msg.Title
 	if title == "" {
-	title = "TimelyNotify"
+		title = "TimelyNotify"
 	}
 
 	if err := gotifyService.Publish(title, msg.Body, gotifyPriority(extras), extras); err != nil {

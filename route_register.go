@@ -78,7 +78,7 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 		Token:    deviceInfo.DeviceToken,
 		Platform: platform,
 	}
-	
+
 	newKey, err := db.SaveDeviceInfo(dbInfo)
 	if err != nil {
 		logger.Errorf("[Register] failed: key=%s err=%v", deviceInfo.DeviceKey, err)

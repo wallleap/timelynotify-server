@@ -42,6 +42,7 @@ func (r routeSlice) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
 // commonOnce guards the request-scoped middleware registration so that
 // routerSetupCommon applies it exactly once per process.
 var commonOnce sync.Once
+
 // routeOnce guards route registration.
 var routeOnce sync.Once
 var routes routeSlice

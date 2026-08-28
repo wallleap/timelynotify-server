@@ -14,7 +14,9 @@ import (
 // credentials defined in harmony_certs.go.
 //
 // Use v3 per Huawei's "基于服务账号生成鉴权令牌" guide:
-//   https://push-api.cloud.huawei.com/v3/[projectId]/messages:send
+//
+//	https://push-api.cloud.huawei.com/v3/[projectId]/messages:send
+//
 // V3 only supports HarmonyOS NEXT/5.x and later; V2 was for 3.x/4.x; V1 is
 // the legacy form and is not recommended. This project targets HarmonyOS
 // NEXT, so v3 is required.
@@ -59,7 +61,7 @@ type Target struct {
 
 type PushOptions struct {
 	TestMessage bool `json:"testMessage,omitempty"`
-	TTL        int  `json:"ttl,omitempty"`
+	TTL         int  `json:"ttl,omitempty"`
 }
 
 type Notification struct {
@@ -138,7 +140,7 @@ func (c *Client) Send(targetTokens []string, title, body, data string, actionTyp
 		Target: Target{Token: targetTokens},
 		PushOptions: &PushOptions{
 			TestMessage: false,
-			TTL:        defaultTTL,
+			TTL:         defaultTTL,
 		},
 	}
 
