@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,8 +22,22 @@ type Store interface {
 	// descending (newest first). since==0 disables the filter.
 	Recent(limit int, since uint64) ([]Message, error)
 	// RecentByDevice is Recent filtered to a single device; device=="" returns
-	// everything (same as Recent).
+	// everything (same as Recent). limit<0 disables the cap (returns the full
+	// device history); limit==0 returns an empty list.
 	RecentByDevice(device string, limit int, since uint64) ([]Message, error)
+	// SearchByDevice walks the device's full history matching keyword as a
+	// case-insensitive substring of title or body (empty keyword matches all),
+	// returning up to limit matches newest-first (limit<0 → all) together with
+	// the total number of matches for the device, counted independently of
+	// limit. since==0 disables the ID filter.
+	SearchByDevice(device string, keyword string, limit int, since uint64) ([]Message, int, error)
+	// ForEachByDevice walks the device's full history once (newest-first),
+	// invoking fn for every message matching the device and keyword
+	// (case-insensitive substring of title+body; empty keyword matches all)
+	// with ID < since. It returns the total number of matches visited; an
+	// error from fn aborts the walk and is propagated. Designed for streaming
+	// exports: fn runs per message so the caller never holds the full set.
+	ForEachByDevice(device string, keyword string, since uint64, fn func(Message) error) (int, error)
 	// Delete removes the message with the given ID; the bool reports whether
 	// it existed. The ID sequence is never reused.
 	Delete(id uint64) (bool, error)
@@ -136,17 +151,21 @@ func (s *bboltStore) Recent(limit int, since uint64) ([]Message, error) {
 }
 
 func (s *bboltStore) RecentByDevice(device string, limit int, since uint64) ([]Message, error) {
-	if limit <= 0 {
+	if limit == 0 {
 		return []Message{}, nil
 	}
-	out := make([]Message, 0, limit)
+	capHint := limit
+	if capHint < 0 || capHint > 512 {
+		capHint = 64
+	}
+	out := make([]Message, 0, capHint)
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketMessages))
 		c := b.Cursor()
 		// Position just past the last key, then step back onto the newest.
 		_, _ = c.Seek(uint64Bytes(^uint64(0)))
 		k, _ := c.Prev()
-		for len(out) < limit && k != nil {
+		for (limit < 0 || len(out) < limit) && k != nil {
 			id := bytesUint64(k)
 			if since != 0 && id >= since {
 				k, _ = c.Prev()
@@ -165,6 +184,97 @@ func (s *bboltStore) RecentByDevice(device string, limit int, since uint64) ([]M
 		return nil
 	})
 	return out, err
+}
+
+// messageMatches reports whether the message matches the already-lowercased
+// keyword as a substring of title or body; an empty keyword matches all.
+func messageMatches(m *Message, lowerKeyword string) bool {
+	if lowerKeyword == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(m.Title), lowerKeyword) ||
+		strings.Contains(strings.ToLower(m.Message), lowerKeyword)
+}
+
+func (s *bboltStore) SearchByDevice(device string, keyword string, limit int, since uint64) ([]Message, int, error) {
+	kw := strings.ToLower(keyword)
+	capHint := limit
+	if capHint < 0 || capHint > 512 {
+		capHint = 64
+	}
+	out := make([]Message, 0, capHint)
+	total := 0
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketMessages))
+		c := b.Cursor()
+		_, _ = c.Seek(uint64Bytes(^uint64(0)))
+		k, _ := c.Prev()
+		for k != nil {
+			id := bytesUint64(k)
+			if since != 0 && id >= since {
+				k, _ = c.Prev()
+				continue
+			}
+			var m Message
+			if err := json.Unmarshal(b.Get(k), &m); err != nil {
+				return err
+			}
+			m.ID = id
+			if device != "" && m.SourceDevice() != device {
+				k, _ = c.Prev()
+				continue
+			}
+			if !messageMatches(&m, kw) {
+				k, _ = c.Prev()
+				continue
+			}
+			total++
+			if limit < 0 || len(out) < limit {
+				out = append(out, m)
+			}
+			k, _ = c.Prev()
+		}
+		return nil
+	})
+	return out, total, err
+}
+
+func (s *bboltStore) ForEachByDevice(device string, keyword string, since uint64, fn func(Message) error) (int, error) {
+	kw := strings.ToLower(keyword)
+	total := 0
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketMessages))
+		c := b.Cursor()
+		_, _ = c.Seek(uint64Bytes(^uint64(0)))
+		k, _ := c.Prev()
+		for k != nil {
+			id := bytesUint64(k)
+			if since != 0 && id >= since {
+				k, _ = c.Prev()
+				continue
+			}
+			var m Message
+			if err := json.Unmarshal(b.Get(k), &m); err != nil {
+				return err
+			}
+			m.ID = id
+			if device != "" && m.SourceDevice() != device {
+				k, _ = c.Prev()
+				continue
+			}
+			if !messageMatches(&m, kw) {
+				k, _ = c.Prev()
+				continue
+			}
+			total++
+			if err := fn(m); err != nil {
+				return err
+			}
+			k, _ = c.Prev()
+		}
+		return nil
+	})
+	return total, err
 }
 
 func (s *bboltStore) Delete(id uint64) (bool, error) {
@@ -341,13 +451,17 @@ func (s *memoryStore) Recent(limit int, since uint64) ([]Message, error) {
 }
 
 func (s *memoryStore) RecentByDevice(device string, limit int, since uint64) ([]Message, error) {
-	if limit <= 0 {
+	if limit == 0 {
 		return []Message{}, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Message, 0, limit)
-	for i := len(s.order) - 1; i >= 0 && len(out) < limit; i-- {
+	capHint := limit
+	if capHint < 0 || capHint > 512 {
+		capHint = 64
+	}
+	out := make([]Message, 0, capHint)
+	for i := len(s.order) - 1; i >= 0 && (limit < 0 || len(out) < limit); i-- {
 		id := s.order[i]
 		if since != 0 && id >= since {
 			continue
@@ -358,6 +472,73 @@ func (s *memoryStore) RecentByDevice(device string, limit int, since uint64) ([]
 		}
 	}
 	return out, nil
+}
+
+func (s *memoryStore) SearchByDevice(device string, keyword string, limit int, since uint64) ([]Message, int, error) {
+	kw := strings.ToLower(keyword)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	capHint := limit
+	if capHint < 0 || capHint > 512 {
+		capHint = 64
+	}
+	out := make([]Message, 0, capHint)
+	total := 0
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		if since != 0 && id >= since {
+			continue
+		}
+		m := s.msgs[id]
+		if device != "" && m.SourceDevice() != device {
+			continue
+		}
+		if !messageMatches(&m, kw) {
+			continue
+		}
+		total++
+		if limit < 0 || len(out) < limit {
+			out = append(out, m)
+		}
+	}
+	return out, total, nil
+}
+
+func (s *memoryStore) ForEachByDevice(device string, keyword string, since uint64, fn func(Message) error) (int, error) {
+	kw := strings.ToLower(keyword)
+	// Snapshot candidate ids under the lock, then run fn outside it so a slow
+	// streaming consumer never blocks concurrent Publish/Add.
+	s.mu.Lock()
+	var ids []uint64
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		if since != 0 && id >= since {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+
+	total := 0
+	for _, id := range ids {
+		s.mu.Lock()
+		m, ok := s.msgs[id]
+		s.mu.Unlock()
+		if !ok {
+			continue // evicted concurrently
+		}
+		if device != "" && m.SourceDevice() != device {
+			continue
+		}
+		if !messageMatches(&m, kw) {
+			continue
+		}
+		total++
+		if err := fn(m); err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 func (s *memoryStore) Delete(id uint64) (bool, error) {

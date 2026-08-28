@@ -152,6 +152,19 @@ func (s *Service) MessagesByDevice(device string, limit int, since uint64) ([]Me
 	return s.store.RecentByDevice(device, limit, since)
 }
 
+// SearchMessagesByDevice returns the device's messages matching keyword
+// (case-insensitive substring of title+body) newest-first, capped at limit
+// (limit<0 → all), together with the total number of matches for the device.
+func (s *Service) SearchMessagesByDevice(device, keyword string, limit int, since uint64) ([]Message, int, error) {
+	return s.store.SearchByDevice(device, keyword, limit, since)
+}
+
+// ForEachMessageByDevice streams the device's matching messages (newest-first)
+// through fn one at a time — see Store.ForEachByDevice.
+func (s *Service) ForEachMessageByDevice(device, keyword string, since uint64, fn func(Message) error) (int, error) {
+	return s.store.ForEachByDevice(device, keyword, since, fn)
+}
+
 // DeleteMessageByDevice removes the message only when it belongs to device;
 // the bool reports whether such a message existed.
 func (s *Service) DeleteMessageByDevice(device string, id uint64) (bool, error) {

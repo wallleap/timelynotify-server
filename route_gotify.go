@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wallleap/timelynotify-server/internal/gotifycompat"
+	jsoniter "github.com/json-iterator/go"
+
 	"github.com/gofiber/fiber/v2"
 	fiberws "github.com/gofiber/websocket/v2"
 	"github.com/mritd/logger"
+	"github.com/wallleap/timelynotify-server/internal/gotifycompat"
 )
 
 // gotifyService is the lazily-initialized gotify-compatible monitoring service.
@@ -54,43 +58,91 @@ func routeGotifyDeviceVersion(c *fiber.Ctx) error {
 	return c.JSON(map[string]string{"version": gotifyService.Version()})
 }
 
-// messageQuery holds the shared limit/since pagination parsed from a request.
+// messageQuery holds the shared limit/since pagination parsed from a request,
+// plus the optional keyword search term.
 type messageQuery struct {
 	limit int
 	since uint64
+	// query is the keyword for title+body substring search; empty disables it.
+	query string
 }
 
-// parseMessageQuery reads limit (default 100, max 200, min 1) and since
-// (ID < since) from the request, following the global /message semantics.
+// parseMessageQuery reads limit (default 100, max 200, min 1; -1 disables the
+// cap and returns the full device history for export; 0 is kept as-is and
+// yields an empty result set — the safe-failure value), since (ID < since) and
+// query (search keyword) from the request.
 func parseMessageQuery(c *fiber.Ctx) messageQuery {
 	limit := c.QueryInt("limit", 100)
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 200 {
-		limit = 200
+	if limit != -1 && limit != 0 {
+		limit = max(1, min(limit, 200))
 	}
 	var since uint64
 	if s := c.Query("since"); s != "" {
 		since, _ = strconv.ParseUint(s, 10, 64)
 	}
-	return messageQuery{limit: limit, since: since}
+	return messageQuery{limit: limit, since: since, query: strings.TrimSpace(c.Query("query"))}
 }
 
-// messageResponse wraps a message list in the gotify paging envelope.
-func messageResponse(messages []gotifycompat.Message, q messageQuery) map[string]interface{} {
+// messageResponse wraps a message list in the gotify paging envelope. total is
+// the full match count (included in paging when >= 0, only meaningful for
+// search requests which already walk the full history).
+func messageResponse(messages []gotifycompat.Message, q messageQuery, total int) map[string]interface{} {
+	paging := map[string]interface{}{
+		"size":  len(messages),
+		"limit": q.limit,
+		"since": q.since,
+	}
+	if total >= 0 {
+		paging["total"] = total
+	}
 	return map[string]interface{}{
-		"paging": map[string]interface{}{
-			"size":  len(messages),
-			"limit": q.limit,
-			"since": q.since,
-		},
+		"paging":   paging,
 		"messages": messages,
 	}
 }
 
+// exportMessagesStream streams a limit<0 export as chunked transfer: the
+// messages array is written element by element as the store walk produces
+// them (per-message memory, never materializing the full set regardless of
+// the retained-message cap), and the paging object is appended after the
+// array. The body stays one valid JSON envelope; a mid-stream failure is
+// logged and reported via an "error" field in paging.
+func exportMessagesStream(c *fiber.Ctx, device string, q messageQuery) error {
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		w.WriteString(`{"messages":[`)
+		size := 0
+		total, walkErr := gotifyService.ForEachMessageByDevice(device, q.query, q.since, func(m gotifycompat.Message) error {
+			b, err := jsoniter.Marshal(m)
+			if err != nil {
+				return err
+			}
+			if size > 0 {
+				w.WriteByte(',')
+			}
+			if _, err := w.Write(b); err != nil {
+				return err
+			}
+			size++
+			return w.Flush()
+		})
+		if walkErr != nil {
+			logger.Errorf("[Gotify] export stream truncated: device_key=%s size=%d err=%v", device, size, walkErr)
+		}
+		paging := fmt.Sprintf(`],"paging":{"size":%d,"limit":%d,"since":%d,"total":%d`, size, q.limit, q.since, total)
+		if walkErr != nil {
+			paging += `,"error":"stream truncated"`
+		}
+		paging += "}}"
+		_, _ = w.WriteString(paging)
+		_ = w.Flush()
+	})
+	return nil
+}
+
 // routeGotifyDeviceMessage is the device-scoped GET /message: only messages of
-// the device_key in the URL path are returned.
+// the device_key in the URL path are returned. With ?query=<keyword> it
+// returns keyword matches (title+body, case-insensitive) and paging.total.
+// With limit<0 the response is streamed element by element.
 func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 	if gotifyService == nil {
 		logger.Warnf("[Gotify] service not initialized for message query")
@@ -103,7 +155,23 @@ func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 
 	q := parseMessageQuery(c)
 	device := c.Params("device_key")
-	logger.Infof("[Gotify] message query: device_key=%s limit=%d since=%d", device, q.limit, q.since)
+	logger.Infof("[Gotify] message query: device_key=%s limit=%d since=%d search=%t", device, q.limit, q.since, q.query != "")
+
+	// limit<0 → full export (with or without keyword): stream chunked so the
+	// response never materializes the whole set in memory.
+	if q.limit < 0 {
+		return exportMessagesStream(c, device, q)
+	}
+
+	if q.query != "" {
+		messages, total, err := gotifyService.SearchMessagesByDevice(device, q.query, q.limit, q.since)
+		if err != nil {
+			logger.Errorf("[Gotify] message search failed: device_key=%s err=%v", device, err)
+			return c.Status(500).JSON(failed(500, "search messages failed: %v", err))
+		}
+		logger.Infof("[Gotify] message search success: device_key=%s count=%d total=%d", device, len(messages), total)
+		return c.JSON(messageResponse(messages, q, total))
+	}
 
 	messages, err := gotifyService.MessagesByDevice(device, q.limit, q.since)
 	if err != nil {
@@ -111,7 +179,7 @@ func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 		return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
 	}
 	logger.Infof("[Gotify] message query success: device_key=%s count=%d", device, len(messages))
-	return c.JSON(messageResponse(messages, q))
+	return c.JSON(messageResponse(messages, q, -1))
 }
 
 // routeGotifyDeviceMessageDeleteAll wipes only the given device's message

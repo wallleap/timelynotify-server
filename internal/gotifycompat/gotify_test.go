@@ -2,6 +2,7 @@ package gotifycompat
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -567,6 +568,186 @@ func TestMessagesByDeviceNewestFirstWithinDevice(t *testing.T) {
 	}
 }
 
+// TestMessagesUnlimitedLimit: limit<0 means "no cap" (the export use case) —
+// every stored message of the device is returned, newest first, on both
+// stores. limit==0 keeps returning an empty list.
+func TestMessagesUnlimitedLimit(t *testing.T) {
+	svc := buildTestService(t, "")
+	publishDevice(t, svc, "k1", 3)
+	publishDevice(t, svc, "k2", 2)
+
+	msgs, err := svc.MessagesByDevice("k1", -1, 0)
+	if err != nil {
+		t.Fatalf("MessagesByDevice(k1, -1): %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("bbolt limit=-1: want all 3 k1 messages, got %d", len(msgs))
+	}
+	all, _ := svc.MessagesByDevice("", -1, 0)
+	if len(all) != 5 {
+		t.Fatalf("bbolt limit=-1 (all devices): want 5, got %d", len(all))
+	}
+
+	mem := buildMemoryFallbackService(t)
+	publishDevice(t, mem, "d1", 3)
+	memMsgs, err := mem.MessagesByDevice("d1", -1, 0)
+	if err != nil {
+		t.Fatalf("memory MessagesByDevice(d1, -1): %v", err)
+	}
+	if len(memMsgs) != 3 {
+		t.Fatalf("memory limit=-1: want all 3, got %d", len(memMsgs))
+	}
+	empty, _ := svc.MessagesByDevice("k1", 0, 0)
+	if len(empty) != 0 {
+		t.Fatalf("limit=0 must stay empty, got %d", len(empty))
+	}
+}
+
+// TestSearchMessagesByDevice: keyword search is a case-insensitive substring
+// match over title+body, scoped to one device, with `total` counting every
+// match of the device regardless of limit. Both stores must behave the same.
+func TestSearchMessagesByDevice(t *testing.T) {
+	svc := buildTestService(t, "")
+	pub := func(device, title, body string) {
+		t.Helper()
+		if err := svc.Publish(title, body, 0, map[string]interface{}{"device_key": device}); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+	}
+	pub("k1", "Alert", "disk almost full")
+	pub("k1", "提醒", "服务器 CPU 高")
+	pub("k1", "alert banner", "nothing to see")
+	pub("k2", "ALERT", "other device")
+
+	// Case-insensitive title match, device-scoped (k2 excluded).
+	msgs, total, err := svc.SearchMessagesByDevice("k1", "alert", -1, 0)
+	if err != nil {
+		t.Fatalf("SearchMessagesByDevice(alert): %v", err)
+	}
+	if total != 2 || len(msgs) != 2 {
+		t.Fatalf("title match: want 2/2, got total=%d len=%d", total, len(msgs))
+	}
+
+	// Body match with non-ASCII text.
+	msgs, total, err = svc.SearchMessagesByDevice("k1", "cpu", -1, 0)
+	if err != nil {
+		t.Fatalf("SearchMessagesByDevice(cpu): %v", err)
+	}
+	if total != 1 || len(msgs) != 1 || msgs[0].Title != "提醒" {
+		t.Fatalf("body match: want the CPU message, got total=%d len=%d msgs=%v", total, len(msgs), msgs)
+	}
+
+	// limit caps the list but not total.
+	pub("k1", "m", "match")
+	pub("k1", "m", "match")
+	msgs, total, err = svc.SearchMessagesByDevice("k1", "match", 2, 0)
+	if err != nil {
+		t.Fatalf("SearchMessagesByDevice(match, limit=2): %v", err)
+	}
+	if len(msgs) != 2 || total != 2 {
+		t.Fatalf("limited search: want len=2 total=2, got len=%d total=%d", len(msgs), total)
+	}
+	pub("k1", "m", "match")
+	msgs, total, err = svc.SearchMessagesByDevice("k1", "match", 2, 0)
+	if err != nil {
+		t.Fatalf("SearchMessagesByDevice(match, limit=2): %v", err)
+	}
+	if len(msgs) != 2 || total != 3 {
+		t.Fatalf("limited search: want len=2 total=3, got len=%d total=%d", len(msgs), total)
+	}
+
+	// since excludes newer ids from both list and total (ID < since).
+	since := msgs[0].ID
+	_, total, err = svc.SearchMessagesByDevice("k1", "match", -1, since)
+	if err != nil {
+		t.Fatalf("SearchMessagesByDevice(since): %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("search with since: want total=2, got %d", total)
+	}
+
+	// No match → zero, empty, no error.
+	msgs, total, err = svc.SearchMessagesByDevice("k1", "no-such-keyword", -1, 0)
+	if err != nil || len(msgs) != 0 || total != 0 {
+		t.Fatalf("no match: want 0/0, got len=%d total=%d err=%v", len(msgs), total, err)
+	}
+
+	// Memory store parity.
+	mem := buildMemoryFallbackService(t)
+	if err := mem.Publish("Alert", "x", 0, map[string]interface{}{"device_key": "d1"}); err != nil {
+		t.Fatalf("mem Publish: %v", err)
+	}
+	if err := mem.Publish("other", "y", 0, map[string]interface{}{"device_key": "d1"}); err != nil {
+		t.Fatalf("mem Publish: %v", err)
+	}
+	memMsgs, memTotal, err := mem.SearchMessagesByDevice("d1", "ALERT", -1, 0)
+	if err != nil {
+		t.Fatalf("memory SearchMessagesByDevice: %v", err)
+	}
+	if memTotal != 1 || len(memMsgs) != 1 || memMsgs[0].Title != "Alert" {
+		t.Fatalf("memory search: want 1 match, got total=%d len=%d", memTotal, len(memMsgs))
+	}
+}
+
+// TestForEachByDevice: the streaming walk visits a device's matching messages
+// newest-first exactly once per match (device + keyword + since filtered),
+// reports the total match count independently of callback aborts, and
+// propagates a callback error to stop the walk. Both stores must behave the
+// same.
+func TestForEachByDevice(t *testing.T) {
+	pub := func(svc *Service, device, title, body string) {
+		t.Helper()
+		if err := svc.Publish(title, body, 0, map[string]interface{}{"device_key": device}); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+	}
+	for _, svc := range []*Service{buildTestService(t, ""), buildMemoryFallbackService(t)} {
+		pub(svc, "k1", "Alert", "disk full")
+		pub(svc, "k1", "note", "hello")
+		pub(svc, "k1", "alert two", "again")
+		pub(svc, "k2", "ALERT", "other device")
+
+		// Full walk: k1 newest-first.
+		var ids []uint64
+		total, err := svc.ForEachMessageByDevice("k1", "", 0, func(m Message) error {
+			ids = append(ids, m.ID)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("ForEachMessageByDevice: %v", err)
+		}
+		if total != 3 || len(ids) != 3 {
+			t.Fatalf("full walk: want total=3 len=3, got total=%d len=%d", total, len(ids))
+		}
+		if ids[0] != 3 || ids[1] != 2 || ids[2] != 1 {
+			t.Fatalf("walk not newest-first within device: %v", ids)
+		}
+
+		// Keyword + since filtering with total.
+		total, err = svc.ForEachMessageByDevice("k1", "alert", 3, func(Message) error { return nil })
+		if err != nil {
+			t.Fatalf("ForEachMessageByDevice(alert, since=3): %v", err)
+		}
+		if total != 1 { // id 3 excluded by since, k2's ALERT excluded by device
+			t.Fatalf("filtered walk: want total=1, got %d", total)
+		}
+
+		// Callback abort stops the walk and propagates the error.
+		sentinel := errors.New("stop")
+		count := 0
+		total, err = svc.ForEachMessageByDevice("k1", "", 0, func(Message) error {
+			count++
+			return sentinel
+		})
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("callback error not propagated: %v", err)
+		}
+		if count != 1 || total != 1 {
+			t.Fatalf("abort: want count=total=1, got count=%d total=%d", count, total)
+		}
+	}
+}
+
 // TestSourceDeviceFieldTakesPrecedence: SourceDevice must read the stored
 // DeviceKey field first and only fall back to extras when that field is empty
 // (guards the bbolt path, where DeviceKey is dropped by json:"-" and data comes
@@ -792,20 +973,21 @@ func TestPublishPersistenceError(t *testing.T) {
 	}
 }
 
-// TestMessagesNegativeLimit and friends cover the boundary that a non-positive
-// limit short-circuits to an empty result on both stores.
-func TestMessagesNegativeLimit(t *testing.T) {
+// TestMessagesZeroLimit covers the boundary that limit==0 short-circuits to
+// an empty result on both stores. Negative limit now means "no cap" and is
+// covered by TestMessagesUnlimitedLimit.
+func TestMessagesZeroLimit(t *testing.T) {
 	for _, svc := range []*Service{
 		buildTestService(t, ""),
 		buildMemoryFallbackService(t),
 	} {
 		publishN(t, svc, 3)
-		msgs, err := svc.MessagesByDevice("", -1, 0)
+		msgs, err := svc.MessagesByDevice("", 0, 0)
 		if err != nil {
-			t.Fatalf("Messages(-1): %v", err)
+			t.Fatalf("Messages(0): %v", err)
 		}
 		if len(msgs) != 0 {
-			t.Fatalf("want 0 messages for negative limit, got %d", len(msgs))
+			t.Fatalf("want 0 messages for zero limit, got %d", len(msgs))
 		}
 	}
 }
