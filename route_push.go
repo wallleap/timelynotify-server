@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+const DEFAULT_TITLE = "订阅通知"
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 
@@ -467,6 +468,14 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 	}
 
 	actionType := 0
+	// Huawei V3 requires the notification to carry both title and body;
+	// empty-title messages are accepted (hmsCode=0) but silently not
+	// displayed on the device. Bark pushes often carry body only (V1 path
+	// style), so fall back to the body text as the title.
+	title := msg.Title
+	if title == "" {
+		title = DEFAULT_TITLE
+	}
 	logger.Infof("[Push] HarmonyOS push: device_key=%s actionType=%d", msg.DeviceKey, actionType)
 
 	var dataStr string
@@ -476,7 +485,7 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 
 	_, hmsCode, err := pushHarmony(
 		[]string{deviceInfo.Token},
-		msg.Title,
+		title,
 		msg.Body,
 		dataStr,
 		actionType,

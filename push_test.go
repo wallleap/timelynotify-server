@@ -556,6 +556,44 @@ func (p probeNamedDB) DevicesByKey(key string) ([]*database.DeviceInfo, error) {
 	return p.Database.DevicesByKey(key)
 }
 
+// TestHarmonyEmptyTitleFallback covers the Huawei V3 title requirement: the
+// notification must carry a non-empty title, or the message is accepted
+// (hmsCode=0) but silently not displayed. Bark pushes often carry body only
+// (V1 path style), so an empty title must fall back to the body text; an
+// explicit title is preserved untouched.
+func TestHarmonyEmptyTitleFallback(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-title-fallback-token")
+
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) { return 200, nil })
+
+	var gotTitle, gotBody string
+	overridePushHarmony(t, func(_ []string, title, body, _ string, _ int) (int, int, error) {
+		gotTitle, gotBody = title, body
+		return 200, 0, nil
+	})
+
+	// V1 path-style push carries body only — no title.
+	res := doPush(t, "GET", "/"+key+"/qqqqq", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("body-only push should succeed, got %d", res.StatusCode)
+	}
+	if gotTitle != "qqqqq" {
+		t.Fatalf("empty title should fall back to body, got %q", gotTitle)
+	}
+	if gotBody != "qqqqq" {
+		t.Fatalf("body should stay %q, got %q", "qqqqq", gotBody)
+	}
+
+	// An explicit title is preserved.
+	res = doPush(t, "GET", "/"+key+"/qqqqq?title=T", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("titled push should succeed, got %d", res.StatusCode)
+	}
+	if gotTitle != "T" {
+		t.Fatalf("explicit title should be kept, got %q", gotTitle)
+	}
+}
+
 // TestPushUnregisteredDevice covers the unknown-device path: when the
 // device_key is not registered the push must be rejected before APNs.
 func TestPushUnregisteredDevice(t *testing.T) {
