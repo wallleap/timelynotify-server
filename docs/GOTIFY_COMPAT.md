@@ -14,7 +14,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 | Method | Path | 认证 | 说明 |
 | ----- | ---- | ---- | ----------- |
 | GET | `/<device_key>/version` | 无 | 设备级探测，返回服务版本号 |
-| GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息（其余参数语义同全局） |
+| GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息；`limit=-1` 流式导出全部（chunked，`paging` 在末尾且恒含 `total`），`?query=<关键词>` 按 title+body 不区分大小写查找并返回 `paging.total`（参数详见 [API.md](API.md#get-device_keymessage)） |
 | DELETE | `/<device_key>/message?token=<clientToken>` | `token` | 清空该设备的历史消息（其它设备保留） |
 | DELETE | `/<device_key>/message/<id>?token=<clientToken>` | `token` | 删除该设备下指定 id；不属于该设备或不存在返回 404 |
 | GET | `/<device_key>/stream?token=<clientToken>` | `token` | WebSocket，实时推送该设备的裸消息帧 |
