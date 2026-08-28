@@ -40,7 +40,9 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 - `priority` 由 bark 的 `level` 映射：`critical`/`timeSensitive`→2、`active`→1、其余→0。
 - token 读取优先级：`?token=` → `X-Gotify-Key` 头 → `Authorization: Bearer`（与 Gotify 相同）。
   **推荐用 header 传递**（`X-Gotify-Key` 或 `Authorization: Bearer`）：token 不进入 URL，也就不会出现在
-  代理/网关与访问日志里（本服务端访问日志只记路径，不记 query）。生产部署务必启用 TLS
+  代理/网关与访问日志里（本服务端访问日志只记路径，不记 query）。注意：若开启了 Basic Auth，
+  `Authorization` 头已被 `Basic` 占用，Bearer 会被门禁拒绝（418），此时应改用 `X-Gotify-Key` 头或 `?token=`。
+  生产部署务必启用 TLS
   （`--cert`/`--key` 或反向代理），否则任何 token 传递方式在网络层都是明文。
 - 未授权访问设备级 `/<device_key>/message`、`/<device_key>/stream` 返回 `401`（WebSocket 在握手阶段返回 401）。
 
