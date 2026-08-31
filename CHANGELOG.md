@@ -1,8 +1,36 @@
 <a name="unreleased"></a>
 
+## [v0.5.2](https://github.com/wallleap/timelynotify-server/compare/v0.5.1...v0.5.2)
+
+> 2026-08-28
+
+### Bug Fixes
+
+- **database:** 修复legacy设备记录重复推送和残留问题
+- **push:** 修复鸿蒙空标题 fallback 逻辑
+- **route_push:** 适配华为V3推送需要非空标题的要求
+
+### Documentation
+
+- update compatibility and differences docs
+- 更新全量文档以适配多平台扇出推送逻辑
+- 完善文档并新增API文档
+- **gotify-compat:** update gotify兼容说明，补充basic auth下的头信息注意事项
+
+### Features
+
+- 实现多平台推送支持，重构数据库层与推送逻辑
+- **gotify:** add message search and streaming export support
+- **route_push:** 新增扫描探针路径的静默404处理逻辑
+
+### Tests
+
+- **auth:** add route auth related test cases
+
+
 ## [v0.5.1](https://github.com/wallleap/timelynotify-server/compare/v0.5.0...v0.5.1)
 
-> 2026-08-24
+> 2026-08-25
 
 ### Bug Fixes
 
@@ -10,6 +38,7 @@
 
 ### Documentation
 
+- update CHANGELOG for v0.5.1
 - add global /version endpoint for client identity check
 
 ### Features
