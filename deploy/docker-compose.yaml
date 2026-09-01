@@ -4,25 +4,26 @@ services:
     container_name: timelynotify-server
     restart: always
     volumes:
-      # 首次使用 host 目录挂载时，需先执行 sudo chown -R 1000:1000 ./deploy/data
-      # （容器内以非 root 用户 app（uid 1000）运行，否则报 permission denied）
-      - ./data:/data
+      - timelynotify-server-data:/data
     ports:
       - "18080:8080"
     # 修改后的参数通过环境变量注入（不设置即走默认值）
-    # environment:
-    #   Gotify 兼容监控：供 hotify-bridge 监测推送。可省略，未设置时自动生成并打印一次
-    #   BARK_SERVER_GOTIFY_CLIENT_TOKEN: "your-gotify-client-token"
-    #   监控消息保留上限，默认 0 即内置默认 1000
-    #   BARK_SERVER_GOTIFY_MAX_MESSAGES: "1000"
-    #   可选 Basic Auth
-    #   BARK_SERVER_BASIC_AUTH_USER: "admin"
-    #   BARK_SERVER_BASIC_AUTH_PASSWORD: "secret"
-    #   可选 MySQL（不设置则使用文件数据库 Bbolt，存储于 /data）
-    #   BARK_SERVER_DSN: "user:pass@tcp(mysql_host)/bark"
-    #   推送最大批量条数，默认 -1 不限制
-    #   BARK_SERVER_MAX_BATCH_PUSH_COUNT: "100"
-    #   限流（公网/生产部署默认开启）：按来源 IP 对 /register /mcp* 以及推送端点 /push /:device_key 限流
-    #   BARK_SERVER_RATE_LIMIT_IP: "10"
-    #   BARK_SERVER_RATE_LIMIT_BURST: "10"
-    #   BARK_SERVER_RATE_LIMIT_PUSH: "true"
+    environment:
+      # 客户端 token，用于获取、删除、监控消息（必须设置成其它的）
+      BARK_SERVER_GOTIFY_CLIENT_TOKEN: "02ob86vvt71lb8sdr14608emfnbfurh6"
+      # 监控消息保留上限，默认 0 即内置默认 1000
+      BARK_SERVER_GOTIFY_MAX_MESSAGES: "10000"
+      # 可选 Basic Auth
+      # BARK_SERVER_BASIC_AUTH_USER: "admin"
+      # BARK_SERVER_BASIC_AUTH_PASSWORD: "secret"
+      # 可选 MySQL（不设置则使用文件数据库 Bbolt，存储于 /data）
+      # BARK_SERVER_DSN: "user:pass@tcp(mysql_host)/bark"
+      # 推送最大批量条数，默认 -1 不限制
+      # BARK_SERVER_MAX_BATCH_PUSH_COUNT: "100"
+      # 限流（公网/生产部署默认开启）：按来源 IP 对 /register /mcp* 以及推送端点 /push /:device_key 限流
+      # BARK_SERVER_RATE_LIMIT_IP: "10"
+      # BARK_SERVER_RATE_LIMIT_BURST: "10"
+      # BARK_SERVER_RATE_LIMIT_PUSH: "true"
+
+volumes:
+  timelynotify-server-data:

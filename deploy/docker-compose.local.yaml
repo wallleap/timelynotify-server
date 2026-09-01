@@ -18,15 +18,15 @@ services:
     ports:
       - "18080:8080"
     # 修改后的参数通过环境变量注入（不设置即走默认值）
-    # environment:
-    #   Gotify 兼容监控：供 hotify-bridge 监测推送。可省略，未设置时自动生成并打印一次
-    #   BARK_SERVER_GOTIFY_CLIENT_TOKEN: "your-gotify-client-token"
-    #   监控消息保留上限，默认 0 即内置默认 1000
-    #   BARK_SERVER_GOTIFY_MAX_MESSAGES: "1000"
-    #   可选 Basic Auth
-    #   BARK_SERVER_BASIC_AUTH_USER: "admin"
-    #   BARK_SERVER_BASIC_AUTH_PASSWORD: "secret"
-    #   可选 MySQL（不设置则使用文件数据库 Bbolt，存储于 /data）
-    #   BARK_SERVER_DSN: "user:pass@tcp(mysql_host)/bark"
-    #   推送最大批量条数，默认 -1 不限制
-    #   BARK_SERVER_MAX_BATCH_PUSH_COUNT: "100"
+    environment:
+      # 客户端 token，用于获取、删除、监控消息（必须设置成其它的）
+      BARK_SERVER_GOTIFY_CLIENT_TOKEN: "02ob86vvt71lb8sdr14608emfnbfurh6"
+      # 监控消息保留上限，默认 0 即内置默认 1000
+      BARK_SERVER_GOTIFY_MAX_MESSAGES: "100000"
+      # 可选 Basic Auth
+      # BARK_SERVER_BASIC_AUTH_USER: "admin"
+      # BARK_SERVER_BASIC_AUTH_PASSWORD: "secret"
+      # 可选 MySQL（不设置则使用文件数据库 Bbolt，存储于 /data）
+      # BARK_SERVER_DSN: "user:pass@tcp(mysql_host)/bark"
+      # 推送最大批量条数，默认 -1 不限制
+      # BARK_SERVER_MAX_BATCH_PUSH_COUNT: "100"
