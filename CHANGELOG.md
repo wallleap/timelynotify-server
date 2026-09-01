@@ -1,8 +1,21 @@
 <a name="unreleased"></a>
 
+## [v0.5.3](https://github.com/wallleap/timelynotify-server/compare/v0.5.2...v0.5.3)
+
+> 2026-09-01
+
+### Documentation
+
+- update README with various changes and fixes
+
+### Maintenance
+
+- **deploy:** update docker-compose configs with sample env vars
+
+
 ## [v0.5.2](https://github.com/wallleap/timelynotify-server/compare/v0.5.1...v0.5.2)
 
-> 2026-08-28
+> 2026-08-31
 
 ### Bug Fixes
 
@@ -12,6 +25,7 @@
 
 ### Documentation
 
+- update CHANGELOG for v0.5.2
 - update compatibility and differences docs
 - 更新全量文档以适配多平台扇出推送逻辑
 - 完善文档并新增API文档
