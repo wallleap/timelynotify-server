@@ -3,7 +3,7 @@
 TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/bark-server](https://github.com/Finb/bark-server)）的一个**修改版分支**，扩展了以下能力：
 
 - **原生双平台推送**：同时支持 iOS（APNs）和 HarmonyOS（华为 Push Kit）原生推送，统一 API 自动路由。可以实现一个 push url 同时向两个平台发送消息。
-- **Gotify 兼容监控**：每一条推送都会进入 Gotify 风格的监控流，供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 消费
+- **Gotify 兼容监控**：每一条推送都会进入 Gotify 风格的监控流
 - **MCP 接口**：AI 代理可直接通过 MCP 协议调用推送
 
 > **注意**：本项目基于上游修改，**不会同步回原项目**，也不会再使用上游的构建产物 / 镜像。所有二进制、镜像、module 路径均已独立命名，与上游可明确区分。
@@ -11,7 +11,7 @@ TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/b
 - iOS 需下载【Bark】
 - HarmonyOS 需下载【及时通知】
 
-目前 hotify-bridge 只监控某个 device_key 的消息，可在 hotify-bridge 的 `gotify_url` 里追加该 `device_key` 路径（见下文依赖 hotify-bridge 小节），但数据库会存储所有消息，因此只适合个人部署使用，不推荐作为公共服务开放给其他用户。
+推荐自部署，不推荐作为公共服务开放给其他用户
 
 ## 与原项目的区别
 
@@ -63,9 +63,7 @@ docker run -dt --name timelynotify-server --restart unless-stopped \
 ```sh
 # 复制本项目 deploy/docker-compose.yaml 到任意目录
 mkdir timelynotify-server && cd timelynotify-server
-curl -sL https://raw.githubusercontent.com/wallleap/timelynotify-server/master/deploy/docker-compose.yaml -o docker-compose.yaml
-# 提前赋权避免容器权限报错
-sudo chown -R 1000:1000 ./data
+curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/wallleap/timelynotify-server/master/deploy/docker-compose.yaml -o docker-compose.yaml
 # 后台启动
 docker compose up -d
 ```
@@ -134,12 +132,12 @@ systemctl enable --now timelynotify-server
 3. 启动（含修改后的参数）：
 
     ```sh
-    ./timelynotify-server --addr 0.0.0.0:8080 --data ./bark-data \
+    ./timelynotify-server --addr 0.0.0.0:18080 --data ./bark-data \
     --gotify-client-token your-gotify-client-token \
     --user admin --password secret
     ```
 
-4. 测试：`curl localhost:8080/ping`
+4. 测试：`curl localhost:18080/ping`
 
 **注意：服务端默认使用 `/data` 目录存储数据，请确保有写权限，否则用 `--data` 指定目录。**
 
@@ -149,7 +147,7 @@ systemctl enable --now timelynotify-server
 | --- | --- |
 | `--addr` / `BARK_SERVER_ADDRESS` | 监听地址，默认 `0.0.0.0:8080` |
 | `--data` / `BARK_SERVER_DATA_DIR` | 数据目录（bbolt + gotify.db），默认 `/data` |
-| `--gotify-client-token` / `BARK_SERVER_GOTIFY_CLIENT_TOKEN` | Gotify 兼容监控客户端 token，自动生成并持久化。**hotify-bridge 需用它当作 `gotify_token`**（依赖见下文） |
+| `--gotify-client-token` / `BARK_SERVER_GOTIFY_CLIENT_TOKEN` | Gotify 兼容监控客户端 token，自动生成并持久化。 |
 | `--gotify-max-messages` / `BARK_SERVER_GOTIFY_MAX_MESSAGES` | Gotify 监控消息保留上限，默认 `0`（使用内置默认 `1000`） |
 | `--user` / `--password` / `BARK_SERVER_BASIC_AUTH_{USER,PASSWORD}` | 可选 Basic Auth，同时设置后开启，所有非白名单路径请求头要带 `Authorization: Basic base64(user:password)` |
 | `--dsn` / `BARK_SERVER_DSN` | 改用 MySQL 替代 Bbolt |
@@ -176,28 +174,11 @@ systemctl enable --now timelynotify-server
 3. 建议前置 **HTTPS 反向代理**（如 Caddy / Nginx），并限制其仅转发到 `addr`。
 4. 数据目录 `data` 收紧为服务运行用户可读写。
 
-### 依赖 hotify-bridge（Gotify 兼容监控）
-
-本 fork 的 Gotify 兼容接口供 [hotify-bridge](https://github.com/sakura-lolipop/hotify-bridge) 监测推送，需要手动修改代码让其支持监控某个 device_key 的推送。部署时：
-
-1. 设置 `BARK_SERVER_GOTIFY_CLIENT_TOKEN`（**强烈推荐预置**：预置时服务端只存 SHA-256 哈希、不落明文凭证；不设置时自动生成的 token 明文会写进 `<data>/gotify.db`，且仅首次启动在日志打印一次）。
-2. 在 hotify-bridge 的 `bridge_config.yaml` 填入：
-
-    ```yaml
-    gotify_url: http://<bark-host>:18080/<device_key> # 监控某个 device_key 的推送
-    gotify_token: <上面的 client token>
-    ```
-
-    或使用环境变量 `GOTIFY_HTTP_URL` / `GOTIFY_CLIENT_TOKEN`。
-3. 数据目录需可写，以便持久化监控消息（`<data>/gotify.db`）。
-
-详见 [GOTIFY_COMPAT.md](./docs/GOTIFY_COMPAT.md)。
-
 ### 编译
 
 依赖：
 
-- Golang 1.18+
+- Golang 1.25+
 - Go Mod Enabled（`GO111MODULE=on`）
 - Go Mod Proxy Enabled（`GOPROXY=https://goproxy.cn`）
 - [go-task](https://taskfile.dev/installation/)
