@@ -25,7 +25,16 @@ type PushMessage struct {
 	Title       string `form:"title,omitempty" json:"title,omitempty" xml:"title,omitempty" query:"title,omitempty"`
 	Body        string `form:"body,omitempty" json:"body,omitempty" xml:"body,omitempty" query:"body,omitempty"`
 	// ios notification sound(system sound please refer to http://iphonedevwiki.net/index.php/AudioServices)
-	Sound     string                 `form:"sound,omitempty" json:"sound,omitempty" xml:"sound,omitempty" query:"sound,omitempty"`
+	Sound string `form:"sound,omitempty" json:"sound,omitempty" xml:"sound,omitempty" query:"sound,omitempty"`
+	// Badge is the number displayed on the app icon.  Any int is accepted
+	// (including zero to clear the badge).  HasBadge disambiguates the zero
+	// value ("explicit 0" vs "parameter was not sent").
+	Badge int `form:"badge,omitempty" json:"badge,omitempty" xml:"badge,omitempty" query:"badge,omitempty"`
+	// HasBadge is true when the request explicitly provided a badge value
+	// (including zero).  When false, Badge is ignored (APNs badge is left
+	// as-is).  This field is internal and intentionally has no struct tags
+	// so it is never serialized to the wire.
+	HasBadge  bool
 	ExtParams map[string]interface{} `form:"ext_params,omitempty" json:"ext_params,omitempty" xml:"ext_params,omitempty" query:"ext_params,omitempty"`
 }
 
@@ -119,6 +128,9 @@ func Push(msg *PushMessage) (code int, err error) {
 			AlertBody(msg.Body).
 			Sound(msg.Sound).
 			Category("myNotificationCategory")
+		if msg.HasBadge {
+			pl = pl.Badge(msg.Badge)
+		}
 		group, exist := msg.ExtParams["group"]
 		if exist && group != nil {
 			// ExtParams values arrive as arbitrary JSON types; assert via

@@ -13,7 +13,7 @@ import (
 func TestClient_Send_EmptyTokens(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClient(ts)
-	status, hmsCode, err := client.Send(nil, "title", "body", "", 0)
+	status, hmsCode, err := client.Send(nil, "title", "body", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for empty tokens")
 	}
@@ -57,7 +57,7 @@ func TestClient_Send_JSONPayload(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
@@ -147,8 +147,7 @@ func TestClient_Send_DataJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, 0)
-
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, 0, nil)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -182,8 +181,7 @@ func TestClient_Send_DataNonJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", 0)
-
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", 0, nil)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -223,7 +221,7 @@ func TestClient_Send_RetryOnTokenExpired(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", 0)
+	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send should succeed after retry, got err: %v", err)
 	}
@@ -258,8 +256,7 @@ func TestClient_Send_DoNotRetryOnOtherError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", 0)
-
+	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", 0, nil)
 	if count := atomic.LoadInt32(&callCount); count != 1 {
 		t.Errorf("expected only 1 call for non-retryable error, got %d", count)
 	}
@@ -267,6 +264,11 @@ func TestClient_Send_DoNotRetryOnOtherError(t *testing.T) {
 
 // rewriteTransport is an http.RoundTripper that redirects a specific
 // Huawei API URL to a local test server.
+// intPtr is a tiny test helper that returns a pointer to an int literal,
+// making Send() calls with explicit absolute badge values (including zero)
+// readable without extra local variables.
+func intPtr(i int) *int { return &i }
+
 type rewriteTransport struct {
 	target string
 }
@@ -299,7 +301,7 @@ func TestClient_Send_SuccessCode80000000(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", 0)
+	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send should succeed with code 80000000, got error: %v", err)
 	}
@@ -330,7 +332,7 @@ func TestClient_Send_HttpError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0)
+	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for HTTP 400, got nil")
 	}
@@ -345,7 +347,7 @@ func TestClient_Send_NetworkError(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClientWithURL(ts, "http://localhost:19999")
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for network failure, got nil")
 	}
@@ -371,7 +373,7 @@ func TestClient_Send_InvalidToken(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", 0)
+	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid token, got nil")
 	}
@@ -403,8 +405,7 @@ func TestClient_Send_ActionType(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	client.Send([]string{"token1"}, "Hello", "World", "", 1)
-
+	client.Send([]string{"token1"}, "Hello", "World", "", 1, nil)
 	var payload map[string]interface{}
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
 		t.Fatalf("failed to unmarshal request: %v", err)
@@ -436,8 +437,7 @@ func TestClient_Send_PushTypeHeader(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", 0)
-
+	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
 	if capturedPushType != "0" {
 		t.Errorf("expected push-type header '0', got %q", capturedPushType)
 	}
@@ -456,5 +456,135 @@ func TestNewClientWithURL(t *testing.T) {
 	client2 := NewClientWithURL(ts, "http://localhost:9999")
 	if client2.baseURL != "http://localhost:9999" {
 		t.Errorf("expected baseURL='http://localhost:9999', got %q", client2.baseURL)
+	}
+}
+
+// TestClient_Send_BadgeDefault verifies that when setNum <= 0 the badge
+// object is still included with addNum:1 (the default per project rules),
+// but setNum is omitted because its zero value uses omitempty.
+//
+// Per the Huawei V3 docs the badge shape is:
+//
+//	"badge": { "addNum": 1 }                    // default, no setNum
+//	"badge": { "addNum": 1, "setNum": 99 }      // explicit badge value
+//
+// TestClient_Send_BadgeSetNumZero verifies that passing an explicit
+// zero via *int (not nil) serializes setNum:0 (badge cleared). This is
+// distinct from the default (nil = addNum:1 increment) because 0 is a
+// valid absolute badge value in Huawei V3 semantics.
+func TestClient_Send_BadgeSetNumZero(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, intPtr(0))
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	badge, ok := notify["badge"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected badge object in notification, got %T", notify["badge"])
+	}
+	// Explicit *int=0 → absolute setNum:0 must be sent (addNum must NOT appear)
+	if _, hasAddNum := badge["addNum"]; hasAddNum {
+		t.Errorf("expected badge.addNum omitted for explicit setNum=0, got addNum=%v", badge["addNum"])
+	}
+	if _, hasSetNum := badge["setNum"]; !hasSetNum {
+		t.Fatalf("expected badge.setNum key present (even when 0) for explicit *int=0")
+	}
+	if badge["setNum"] != float64(0) {
+		t.Errorf("expected badge.setNum=0, got %v", badge["setNum"])
+	}
+}
+
+func TestClient_Send_BadgeDefault(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, nil)
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	badge, ok := notify["badge"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected badge object in notification (always on with addNum default), got %T", notify["badge"])
+	}
+	if badge["addNum"] != float64(1) {
+		t.Errorf("expected badge.addNum=1 (default), got %v", badge["addNum"])
+	}
+	if _, hasSetNum := badge["setNum"]; hasSetNum {
+		t.Errorf("expected badge.setNum to be omitted when setNum=0, got %v", badge["setNum"])
+	}
+}
+
+// TestClient_Send_BadgeWithSetNum verifies that when a badge value is
+// provided (setNum > 0) both addNum:1 and setNum=<value> are present in
+// the serialized badge object.
+func TestClient_Send_BadgeWithSetNum(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, intPtr(99))
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	badge, ok := notify["badge"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected badge object, got %T", notify["badge"])
+	}
+	// When an explicit setNum is provided Huawei treats setNum as overriding
+	// addNum, so we must send ONLY setNum without addNum to avoid ambiguity.
+	if _, hasAddNum := badge["addNum"]; hasAddNum {
+		t.Errorf("expected badge.addNum to be omitted when setNum=99 is set, got addNum=%v", badge["addNum"])
+	}
+	if badge["setNum"] != float64(99) {
+		t.Errorf("expected badge.setNum=99, got %v", badge["setNum"])
 	}
 }

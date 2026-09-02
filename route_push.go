@@ -68,11 +68,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data string, actionType int) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data string, actionType int, setNum *int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, actionType)
+	return harmonyClient.Send(targetTokens, title, body, data, actionType, setNum)
 }
 
 func init() {
@@ -290,6 +290,15 @@ func extractUrlPathParams(c *fiber.Ctx) (map[string]interface{}, error) {
 	return params, nil
 }
 
+// toInt coerces a string to int; used for numeric query params and
+// JSON numbers (fmt.Sprint'd to string first) that represent count values
+// like badge count.
+func toInt(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
+}
+
 func push(params map[string]interface{}) (int, error) {
 	msg := apns.PushMessage{
 		Body:      "",
@@ -318,6 +327,11 @@ func push(params map[string]interface{}) (int, error) {
 				} else {
 					msg.Sound = val + ".caf"
 				}
+			case "badge":
+				if n, err := toInt(val); err == nil {
+					msg.Badge = n
+					msg.HasBadge = true
+				}
 			case "platform":
 				msg.ExtParams["_platform"] = val
 			default:
@@ -332,6 +346,17 @@ func push(params map[string]interface{}) (int, error) {
 		}
 	}
 
+	// Numeric badge handling for JSON numeric types (float64/int) that bypassed
+	// the string case above; clean up the ExtParams side-effect too.  Any int
+	// value is accepted (including zero and negatives), HasBadge distinguishes
+	// "not set" from an explicit zero.
+	if v, ok := msg.ExtParams["badge"]; ok && !msg.HasBadge {
+		if n, err := toInt(fmt.Sprint(v)); err == nil {
+			msg.Badge = n
+			msg.HasBadge = true
+		}
+		delete(msg.ExtParams, "badge")
+	}
 	if msg.DeviceKey == "" {
 		logger.Errorf("[Push] device key is empty")
 		return 400, fmt.Errorf("device key is empty")
@@ -484,12 +509,18 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 		dataStr = customData
 	}
 
+	var badgeArg *int
+	if msg.HasBadge {
+		v := msg.Badge
+		badgeArg = &v
+	}
 	_, hmsCode, err := pushHarmony(
 		[]string{deviceInfo.Token},
 		title,
 		msg.Body,
 		dataStr,
 		actionType,
+		badgeArg,
 	)
 
 	if err != nil {
