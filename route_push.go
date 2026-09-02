@@ -68,11 +68,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data string, actionType int, setNum *int) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, actionType, setNum)
+	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum)
 }
 
 func init() {
@@ -334,6 +334,11 @@ func push(params map[string]interface{}) (int, error) {
 				}
 			case "platform":
 				msg.ExtParams["_platform"] = val
+			case "icon":
+				// Users often copy example URLs wrapped in backticks/whitespace
+				// from docs; APNs image loading and Huawei image download both
+				// fail silently on such URLs, so trim once here for both.
+				msg.ExtParams["icon"] = strings.TrimSpace(strings.Trim(val, "`"))
 			default:
 				msg.ExtParams[strings.ToLower(string(key))] = val
 			}
@@ -502,12 +507,21 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 	if title == "" {
 		title = DEFAULT_TITLE
 	}
-	logger.Infof("[Push] HarmonyOS push: device_key=%s actionType=%d", msg.DeviceKey, actionType)
 
 	var dataStr string
 	if customData, ok := msg.ExtParams["data"].(string); ok {
 		dataStr = customData
 	}
+
+	// Bark `icon` stays in ExtParams for the APNs custom payload; Harmony
+	// maps it to notification.image (large icon URL, HTTPS required).
+	var iconStr string
+	if icon, ok := msg.ExtParams["icon"].(string); ok {
+		iconStr = icon
+	}
+
+	logger.Infof("[Push] HarmonyOS push: device_key=%s actionType=%d hasImage=%v hasData=%v",
+		msg.DeviceKey, actionType, iconStr != "", dataStr != "")
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -519,6 +533,7 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 		title,
 		msg.Body,
 		dataStr,
+		iconStr,
 		actionType,
 		badgeArg,
 	)

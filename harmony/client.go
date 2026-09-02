@@ -74,9 +74,13 @@ type Badge struct {
 }
 
 type Notification struct {
-	Category       string       `json:"category"` // e.g. "MARKETING"
-	Title          string       `json:"title"`
-	Body           string       `json:"body"`
+	Category string `json:"category"` // e.g. "MARKETING"
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	// Image is the URL of the large icon shown on the right side of the
+	// notification.  Per Huawei docs it must be HTTPS and one of
+	// PNG/JPG/JPEG/BMP (recommended <= 128x128 px).  Maps from Bark `icon`.
+	Image          string       `json:"image,omitempty"`
 	Badge          Badge        `json:"badge"`
 	ClickAction    *ClickAction `json:"clickAction,omitempty"`
 	ForegroundShow bool         `json:"foregroundShow"`
@@ -123,6 +127,8 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 // actionType: 0 = open app home on click, 1 = open inner page.
 // data: optional JSON string placed under clickAction.data; if it is not
 // valid JSON it is wrapped as {"data": <string>}. Pass "" to omit.
+// icon: optional HTTPS URL for the notification large icon (maps to
+// notification.image). Pass "" to omit.
 // badgeNum: optional absolute badge value pointer controlling the V3
 // badge object shape.  nil = default behaviour (sends addNum:1 to increment
 // by one), non-nil = send setNum to the given value (including zero, which
@@ -132,7 +138,7 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 // It returns the Huawei HTTP status code, the server's error code (if
 // any), and an error (wrapped with context). On token-expired errors it
 // invalidates the local cache and retries exactly once.
-func (c *Client) Send(targetTokens []string, title, body, data string, actionType int, badgeNum *int) (httpStatus int, hmsCode int, err error) {
+func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int) (httpStatus int, hmsCode int, err error) {
 	if len(targetTokens) == 0 {
 		return 0, 0, fmt.Errorf("no target tokens provided")
 	}
@@ -160,6 +166,7 @@ func (c *Client) Send(targetTokens []string, title, body, data string, actionTyp
 				Category:       defaultCategory,
 				Title:          title,
 				Body:           body,
+				Image:          icon,
 				Badge:          badge,
 				ClickAction:    clickAction,
 				ForegroundShow: true,

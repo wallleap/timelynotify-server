@@ -13,7 +13,7 @@ import (
 func TestClient_Send_EmptyTokens(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClient(ts)
-	status, hmsCode, err := client.Send(nil, "title", "body", "", 0, nil)
+	status, hmsCode, err := client.Send(nil, "title", "body", "", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for empty tokens")
 	}
@@ -57,7 +57,7 @@ func TestClient_Send_JSONPayload(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestClient_Send_DataJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, "", 0, nil)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -181,7 +181,7 @@ func TestClient_Send_DataNonJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", "", 0, nil)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -221,7 +221,7 @@ func TestClient_Send_RetryOnTokenExpired(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", 0, nil)
+	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send should succeed after retry, got err: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestClient_Send_DoNotRetryOnOtherError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", 0, nil)
+	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", "", 0, nil)
 	if count := atomic.LoadInt32(&callCount); count != 1 {
 		t.Errorf("expected only 1 call for non-retryable error, got %d", count)
 	}
@@ -301,7 +301,7 @@ func TestClient_Send_SuccessCode80000000(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
+	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
 	if err != nil {
 		t.Fatalf("Send should succeed with code 80000000, got error: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestClient_Send_HttpError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
+	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for HTTP 400, got nil")
 	}
@@ -347,7 +347,7 @@ func TestClient_Send_NetworkError(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClientWithURL(ts, "http://localhost:19999")
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for network failure, got nil")
 	}
@@ -373,7 +373,7 @@ func TestClient_Send_InvalidToken(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", 0, nil)
+	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid token, got nil")
 	}
@@ -405,7 +405,7 @@ func TestClient_Send_ActionType(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	client.Send([]string{"token1"}, "Hello", "World", "", 1, nil)
+	client.Send([]string{"token1"}, "Hello", "World", "", "", 1, nil)
 	var payload map[string]interface{}
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
 		t.Fatalf("failed to unmarshal request: %v", err)
@@ -437,7 +437,7 @@ func TestClient_Send_PushTypeHeader(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", 0, nil)
+	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
 	if capturedPushType != "0" {
 		t.Errorf("expected push-type header '0', got %q", capturedPushType)
 	}
@@ -472,6 +472,46 @@ func TestNewClientWithURL(t *testing.T) {
 // zero via *int (not nil) serializes setNum:0 (badge cleared). This is
 // distinct from the default (nil = addNum:1 increment) because 0 is a
 // valid absolute badge value in Huawei V3 semantics.
+// TestClient_Send_Image verifies the Bark `icon` parameter maps to the
+// Huawei V3 notification.image field (right-side large icon URL) and is
+// omitted when empty.
+func TestClient_Send_Image(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "https://example.com/icon.png", 0, nil)
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	if notify["image"] != "https://example.com/icon.png" {
+		t.Errorf("expected notification.image=https://example.com/icon.png, got %v", notify["image"])
+	}
+
+	// Empty icon must omit the image key entirely (omitempty).
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil)
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify = payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+	if _, ok := notify["image"]; ok {
+		t.Errorf("expected notification.image omitted when icon empty, got %v", notify["image"])
+	}
+}
+
 func TestClient_Send_BadgeSetNumZero(t *testing.T) {
 	var capturedBody []byte
 
@@ -490,7 +530,7 @@ func TestClient_Send_BadgeSetNumZero(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, intPtr(0))
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(0))
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -530,7 +570,7 @@ func TestClient_Send_BadgeDefault(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -569,7 +609,7 @@ func TestClient_Send_BadgeWithSetNum(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", 0, intPtr(99))
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(99))
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
