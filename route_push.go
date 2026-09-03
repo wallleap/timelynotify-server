@@ -70,11 +70,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum)
+	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration)
 }
 
 func init() {
@@ -341,10 +341,18 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			case "body":
 				msg.Body = val
 			case "sound":
+				// Keep the raw name for HarmonyOS: the V3 client appends
+				// ".mp3" for the app /resources/rawfile lookup, while APNs
+				// uses the .caf-suffixed msg.Sound below.
+				msg.ExtParams["sound"] = val
 				if strings.HasSuffix(val, ".caf") {
 					msg.Sound = val
 				} else {
 					msg.Sound = val + ".caf"
+				}
+			case "soundduration":
+				if n, err := toInt(val); err == nil {
+					msg.ExtParams["soundduration"] = n
 				}
 			case "badge":
 				if n, err := toInt(val); err == nil {
@@ -380,6 +388,20 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			msg.HasBadge = true
 		}
 		delete(msg.ExtParams, "badge")
+	}
+	// Numeric soundDuration for JSON numeric types (float64/int) bypassed
+	// the string switch above, and JSON keys keep their original casing
+	// there (e.g. "soundDuration"). Normalize to int under the lowercase
+	// key; unparseable values are dropped. The HarmonyOS V3 client later
+	// clamps to [1, 60]. Query (lowercase, parsed as string) wins over
+	// body on conflict, matching the Bark precedence rules.
+	for _, k := range []string{"soundDuration", "soundduration"} {
+		if v, ok := msg.ExtParams[k]; ok {
+			delete(msg.ExtParams, k)
+			if n, err := toInt(fmt.Sprint(v)); err == nil {
+				msg.ExtParams["soundduration"] = n
+			}
+		}
 	}
 	if msg.DeviceKey == "" {
 		logger.Errorf("[Push] rid=%s device key is empty", rid)
@@ -545,9 +567,22 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		iconStr = icon
 	}
 
-	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v",
+	// Bark `sound` is the raw ringtone name (shared across platforms);
+	// the V3 client appends ".mp3" for the HarmonyOS /resources/rawfile
+	// lookup. soundDuration (seconds) only takes effect with a sound;
+	// the client clamps it to [1, 60].
+	var soundStr string
+	if sound, ok := msg.ExtParams["sound"].(string); ok {
+		soundStr = sound
+	}
+	var soundDuration int
+	if v, ok := msg.ExtParams["soundduration"]; ok {
+		soundDuration, _ = toInt(fmt.Sprint(v))
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v",
 		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
-		actionType, iconStr != "", dataStr != "")
+		actionType, iconStr != "", dataStr != "", soundStr != "")
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -562,6 +597,8 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		iconStr,
 		actionType,
 		badgeArg,
+		soundStr,
+		soundDuration,
 	)
 
 	if err != nil {

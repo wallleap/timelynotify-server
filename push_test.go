@@ -567,7 +567,7 @@ func TestHarmonyEmptyTitleFallback(t *testing.T) {
 	overridePushAPNs(t, func(*apns.PushMessage) (int, error) { return 200, nil })
 
 	var gotTitle, gotBody string
-	overridePushHarmony(t, func(_ []string, title, body, _, _ string, _ int, _ *int) (int, int, error) {
+	overridePushHarmony(t, func(_ []string, title, body, _, _ string, _ int, _ *int, _ string, _ int) (int, int, error) {
 		gotTitle, gotBody = title, body
 		return 200, 0, nil
 	})
@@ -594,6 +594,56 @@ func TestHarmonyEmptyTitleFallback(t *testing.T) {
 	}
 }
 
+// TestHarmonySoundParams verifies that the Bark `sound` parameter reaches
+// the HarmonyOS channel as the raw ringtone name (the V3 client appends
+// the ".mp3" suffix itself; the APNs ".caf" suffixing must not leak in)
+// and that soundDuration is parsed from both JSON-number and query-string
+// forms.
+func TestHarmonySoundParams(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-sound-token")
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) { return 200, nil })
+
+	var gotSound string
+	var gotDuration int
+	overridePushHarmony(t, func(_ []string, _, _, _, _ string, _ int, _ *int, sound string, soundDuration int) (int, int, error) {
+		gotSound, gotDuration = sound, soundDuration
+		return 200, 0, nil
+	})
+
+	// JSON body: bare sound name + numeric soundDuration.
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hi","sound":"minuet","soundDuration":30}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("push with sound should succeed, got %d", res.StatusCode)
+	}
+	if gotSound != "minuet" {
+		t.Fatalf("harmony sound should be raw name %q, got %q", "minuet", gotSound)
+	}
+	if gotDuration != 30 {
+		t.Fatalf("harmony soundDuration should be 30, got %d", gotDuration)
+	}
+
+	// V1 query form: soundDuration as string.
+	res = doPush(t, "GET", "/"+key+"/hi?sound=alarm&soundDuration=15", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("push with query sound should succeed, got %d", res.StatusCode)
+	}
+	if gotSound != "alarm" {
+		t.Fatalf("harmony sound should be %q, got %q", "alarm", gotSound)
+	}
+	if gotDuration != 15 {
+		t.Fatalf("harmony soundDuration should be 15, got %d", gotDuration)
+	}
+
+	// No sound -> empty sound name and zero duration (fields omitted).
+	res = doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hi"}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("plain push should succeed, got %d", res.StatusCode)
+	}
+	if gotSound != "" || gotDuration != 0 {
+		t.Fatalf("expected empty sound/zero duration, got sound=%q duration=%d", gotSound, gotDuration)
+	}
+}
+
 // TestPushUnregisteredDevice covers the unknown-device path: when the
 // device_key is not registered the push must be rejected before APNs.
 func TestPushUnregisteredDevice(t *testing.T) {
@@ -616,7 +666,7 @@ func TestPushUnregisteredDevice(t *testing.T) {
 
 // overridePushHarmony swaps the Harmony push seam for one test and restores
 // the original afterwards so multi-platform tests don't leak state into siblings.
-func overridePushHarmony(t *testing.T, pushFn func(tokens []string, title, body, data, icon string, actionType int, setNum *int) (int, int, error)) {
+func overridePushHarmony(t *testing.T, pushFn func(tokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int) (int, int, error)) {
 	t.Helper()
 	orig := pushHarmony
 	pushHarmony = pushFn
@@ -657,7 +707,7 @@ func TestPushMultiPlatformFanOut(t *testing.T) {
 	var harmonyCalls int32
 	var harmonyTokens []string
 	var tokensMu sync.Mutex
-	overridePushHarmony(t, func(tokens []string, _, _, _, _ string, _ int, _ *int) (int, int, error) {
+	overridePushHarmony(t, func(tokens []string, _, _, _, _ string, _ int, _ *int, _ string, _ int) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		tokensMu.Lock()
 		harmonyTokens = append(harmonyTokens, tokens...)
@@ -695,7 +745,7 @@ func TestPushMultiPlatformPlatformOverride(t *testing.T) {
 	})
 
 	var harmonyCalls int32
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		return 200, 0, nil
 	})
@@ -737,7 +787,7 @@ func TestPushMultiPlatformSkipClearedToken(t *testing.T) {
 	})
 
 	var harmonyCalls int32
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		return 200, 0, nil
 	})
@@ -762,7 +812,7 @@ func TestPushMultiPlatformAllFail(t *testing.T) {
 	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
 		return 502, errors.New("BadGateway")
 	})
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int) (int, int, error) {
 		return 500, 80200003, errors.New("harmony error")
 	})
 

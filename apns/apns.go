@@ -142,7 +142,14 @@ func Push(msg *PushMessage) (code int, err error) {
 
 	for k, v := range msg.ExtParams {
 		// Change all parameter names to lowercase to prevent inconsistent capitalization
-		pl.Custom(strings.ToLower(k), fmt.Sprintf("%v", v))
+		lowerKey := strings.ToLower(k)
+		// `sound` is already carried by aps.sound (with the .caf suffix);
+		// `soundduration` is a HarmonyOS V3-only field. Neither should be
+		// duplicated as a top-level custom APNs payload key.
+		if lowerKey == "sound" || lowerKey == "soundduration" {
+			continue
+		}
+		pl.Custom(lowerKey, fmt.Sprintf("%v", v))
 	}
 
 	client := <-clients // grab a client from the pool

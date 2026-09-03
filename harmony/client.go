@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,10 @@ const (
 	pushTypeAlert   = "0"
 	defaultCategory = "SUBSCRIPTION"
 	defaultTTL      = 86400
+	// maxSoundDuration is the V3 soundDuration upper bound in seconds.
+	// Per Huawei docs the valid range is [1, 60]; the ringtone loops
+	// until the duration elapses.
+	maxSoundDuration = 60
 )
 
 // Message is the V3 scenario message request body.
@@ -84,6 +89,17 @@ type Notification struct {
 	Badge          Badge        `json:"badge"`
 	ClickAction    *ClickAction `json:"clickAction,omitempty"`
 	ForegroundShow bool         `json:"foregroundShow"`
+	// Sound is the custom notification ringtone file name resolved
+	// against the app's /resources/rawfile directory (e.g. "alert.mp3").
+	// Empty omits the field so the system default ringtone is used.
+	// Ignored (silent) when category is MARKETING; the custom ringtone
+	// right must also be granted in AGC.
+	Sound string `json:"sound,omitempty"`
+	// SoundDuration is the ringtone playback duration in seconds; only
+	// effective together with Sound. Range [1, 60]: a shorter ringtone
+	// loops until the duration elapses. Zero/omitted falls back to the
+	// default 30s truncation.
+	SoundDuration int `json:"soundDuration,omitempty"`
 }
 
 // ClickAction mirrors the V3 clickAction object. actionType 0 opens the
@@ -134,11 +150,18 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 // by one), non-nil = send setNum to the given value (including zero, which
 // clears the badge).  addNum and setNum are NEVER both sent because V3
 // semantics treat setNum as overriding addNum.
+// sound: optional custom ringtone name mapped to notification.sound.
+// A bare Bark sound name (shared with the iOS .caf sounds) gets ".mp3"
+// appended for the HarmonyOS /resources/rawfile lookup; names already
+// carrying an audio extension (.mp3/.wav/.mpeg) are kept as-is. Pass ""
+// for the system default ringtone.
+// soundDuration: ringtone playback duration in seconds, clamped to
+// [1, 60]; only sent when sound is non-empty.
 //
 // It returns the Huawei HTTP status code, the server's error code (if
 // any), and an error (wrapped with context). On token-expired errors it
 // invalidates the local cache and retries exactly once.
-func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int) (httpStatus int, hmsCode int, err error) {
+func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int, sound string, soundDuration int) (httpStatus int, hmsCode int, err error) {
 	if len(targetTokens) == 0 {
 		return 0, 0, fmt.Errorf("no target tokens provided")
 	}
@@ -160,6 +183,15 @@ func (c *Client) Send(targetTokens []string, title, body, data, icon string, act
 		badge.AddNum = 1
 	}
 
+	// Custom ringtone: normalize the Bark sound name to a rawfile file
+	// name. soundDuration only takes effect alongside a sound, so drop it
+	// (and clamp to [1, 60]) at the same boundary.
+	sound = normalizeSoundName(sound)
+	var soundDur int
+	if sound != "" {
+		soundDur = clampSoundDuration(soundDuration)
+	}
+
 	msg := &Message{
 		Payload: Payload{
 			Notification: &Notification{
@@ -170,6 +202,8 @@ func (c *Client) Send(targetTokens []string, title, body, data, icon string, act
 				Badge:          badge,
 				ClickAction:    clickAction,
 				ForegroundShow: true,
+				Sound:          sound,
+				SoundDuration:  soundDur,
 			},
 		},
 		Target: Target{Token: targetTokens},
@@ -190,6 +224,45 @@ func parseDataField(data string) map[string]interface{} {
 		return obj
 	}
 	return map[string]interface{}{"data": data}
+}
+
+// normalizeSoundName maps a Bark ringtone name to the HarmonyOS rawfile
+// file name expected by the V3 notification.sound field. HarmonyOS
+// resolves custom ringtones under the app's /resources/rawfile directory
+// and requires the file extension (MP3/WAV/MPEG...). Bark sound names are
+// shared across platforms but iOS uses .caf while the HarmonyOS client
+// ships .mp3, so a bare name like "minuet" becomes "minuet.mp3"; a name
+// already carrying an audio extension (case-insensitive) is kept as-is.
+func normalizeSoundName(sound string) string {
+	sound = strings.TrimSpace(sound)
+	if sound == "" {
+		return ""
+	}
+	// A .caf suffix is the iOS convention and never exists in the
+	// HarmonyOS rawfile; strip it before deciding on the .mp3 suffix.
+	if strings.HasSuffix(strings.ToLower(sound), ".caf") {
+		sound = sound[:len(sound)-len(".caf")]
+	}
+	lower := strings.ToLower(sound)
+	for _, ext := range []string{".mp3", ".wav", ".mpeg"} {
+		if strings.HasSuffix(lower, ext) {
+			return sound
+		}
+	}
+	return sound + ".mp3"
+}
+
+// clampSoundDuration bounds the V3 soundDuration field to its documented
+// range [1, 60] seconds. Non-positive values return 0 so the field is
+// omitted (omitempty, default 30s truncation); values above 60 are capped.
+func clampSoundDuration(seconds int) int {
+	if seconds < 1 {
+		return 0
+	}
+	if seconds > maxSoundDuration {
+		return maxSoundDuration
+	}
+	return seconds
 }
 
 // sendWithRetry performs the actual HTTP call. It retries once on the
@@ -292,5 +365,5 @@ func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 // Huawei Push Kit API.
 type hmsResponse struct {
 	Code    json.Number `json:"code"`
-	Message string `json:"msg"`
+	Message string      `json:"msg"`
 }
