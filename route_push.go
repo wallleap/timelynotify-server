@@ -8,11 +8,13 @@ import (
 	"sync"
 
 	"github.com/gofiber/fiber/v2/utils"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/mritd/logger"
 
 	"github.com/wallleap/timelynotify-server/apns"
 	"github.com/wallleap/timelynotify-server/database"
 	"github.com/wallleap/timelynotify-server/harmony"
+	"github.com/wallleap/timelynotify-server/internal/logging"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -105,29 +107,33 @@ func SetMaxBatchPushCount(count int) {
 // logPushFailure logs a push failure. 404 (device not found, e.g. scanner
 // probes) is a client-side condition logged at INFO; everything else is a
 // server-side fault logged at ERROR.
-func logPushFailure(stage, deviceKey string, code int, err error) {
+// rid is the request trace id (may be empty when invoked outside an HTTP
+// request, e.g. in tests). deviceKey is middle-masked before writing.
+func logPushFailure(rid, stage, deviceKey string, code int, err error) {
+	maskedKey := logging.MaskMiddle(deviceKey)
 	if code == 404 {
-		logger.Infof("[Push] %s not found: device_key=%s code=%d err=%v", stage, deviceKey, code, err)
+		logger.Infof("[Push] rid=%s %s not found: device_key=%s code=%d err=%v", rid, stage, maskedKey, code, err)
 		return
 	}
-	logger.Errorf("[Push] %s failed: device_key=%s code=%d err=%v", stage, deviceKey, code, err)
+	logger.Errorf("[Push] rid=%s %s failed: device_key=%s code=%d err=%v", rid, stage, maskedKey, code, err)
 }
 
 func routeDoPush(c *fiber.Ctx) error {
+	rid := ridFrom(c)
 	contentType := utils.ToLower(utils.UnsafeString(c.Request().Header.ContentType()))
 	contentType = utils.ParseVendorSpecificContentType(contentType)
 
-	logger.Infof("[Push] received: method=%s path=%s content-type=%s",
-		c.Method(), c.Path(), contentType)
+	logger.Infof("[Push] rid=%s received: method=%s path=%s content-type=%s",
+		rid, c.Method(), c.Path(), contentType)
 
 	if strings.HasPrefix(contentType, "application/json") {
-		return routeDoPushV2(c)
+		return routeDoPushV2(c, rid)
 	}
-	return routeDoPushV1(c)
+	return routeDoPushV1(c, rid)
 }
 
-func routeDoPushV1(c *fiber.Ctx) error {
-	logger.Infof("[Push] V1 request: path=%s", c.Path())
+func routeDoPushV1(c *fiber.Ctx, rid string) error {
+	logger.Infof("[Push] rid=%s V1 request: path=%s", rid, c.Path())
 
 	params := make(map[string]interface{})
 	visitor := func(key, value []byte) {
@@ -145,7 +151,7 @@ func routeDoPushV1(c *fiber.Ctx) error {
 	}
 	pathParams, err := extractUrlPathParams(c)
 	if err != nil {
-		logger.Warnf("[Push] V1 path parse failed: %v", err)
+		logger.Warnf("[Push] rid=%s V1 path parse failed: %v", rid, err)
 		return c.Status(400).JSON(failed(400, "url path parse failed: %v", err))
 	}
 	for key, val := range pathParams {
@@ -156,22 +162,27 @@ func routeDoPushV1(c *fiber.Ctx) error {
 	if dk, ok := params["device_key"]; ok {
 		deviceKey = fmt.Sprint(dk)
 	}
-	logger.Infof("[Push] V1 params parsed: device_key=%s", deviceKey)
+	// Log params with sensitive/content fields masked so operators can see
+	// what was submitted without leaking tokens or message body.
+	if bodyBytes, mErr := jsoniter.Marshal(logging.MaskSensitiveFields(params)); mErr == nil {
+		logger.Infof("[Push] rid=%s V1 params: %s", rid, string(bodyBytes))
+	}
 
-	code, err := push(params)
+	code, err := push(rid, params)
 	if err != nil {
-		logPushFailure("V1", deviceKey, code, err)
+		logPushFailure(rid, "V1", deviceKey, code, err)
 		return c.Status(code).JSON(failed(code, "%s", err.Error()))
 	}
-	logger.Infof("[Push] V1 success: device_key=%s code=%d", deviceKey, code)
+	logger.Infof("[Push] rid=%s V1 success: device_key=%s code=%d", rid, logging.MaskMiddle(deviceKey), code)
 	return c.JSON(success())
 }
-func routeDoPushV2(c *fiber.Ctx) error {
-	logger.Infof("[Push] V2 request: path=%s", c.Path())
+
+func routeDoPushV2(c *fiber.Ctx, rid string) error {
+	logger.Infof("[Push] rid=%s V2 request: path=%s", rid, c.Path())
 
 	params := make(map[string]interface{})
 	if err := c.BodyParser(&params); err != nil && err != fiber.ErrUnprocessableEntity {
-		logger.Warnf("[Push] V2 body parse failed: %v", err)
+		logger.Warnf("[Push] rid=%s V2 body parse failed: %v", rid, err)
 		return c.Status(400).JSON(failed(400, "request bind failed: %v", err))
 	}
 	c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
@@ -179,7 +190,7 @@ func routeDoPushV2(c *fiber.Ctx) error {
 	})
 	pathParams, err := extractUrlPathParams(c)
 	if err != nil {
-		logger.Warnf("[Push] V2 path parse failed: %v", err)
+		logger.Warnf("[Push] rid=%s V2 path parse failed: %v", rid, err)
 		return c.Status(400).JSON(failed(400, "url path parse failed: %v", err))
 	}
 	for key, val := range pathParams {
@@ -208,19 +219,21 @@ func routeDoPushV2(c *fiber.Ctx) error {
 		if dk, ok := params["device_key"]; ok {
 			deviceKey = fmt.Sprint(dk)
 		}
-		logger.Infof("[Push] V2 single push: device_key=%s", deviceKey)
-		code, err := push(params)
+		if bodyBytes, mErr := jsoniter.Marshal(logging.MaskSensitiveFields(params)); mErr == nil {
+			logger.Infof("[Push] rid=%s V2 single params: %s", rid, string(bodyBytes))
+		}
+		code, err := push(rid, params)
 		if err != nil {
-			logPushFailure("V2", deviceKey, code, err)
+			logPushFailure(rid, "V2", deviceKey, code, err)
 			return c.Status(code).JSON(failed(code, "%s", err.Error()))
 		}
-		logger.Infof("[Push] V2 single success: device_key=%s code=%d", deviceKey, code)
+		logger.Infof("[Push] rid=%s V2 single success: device_key=%s code=%d", rid, logging.MaskMiddle(deviceKey), code)
 		return c.JSON(success())
 	}
 
-	logger.Infof("[Push] V2 batch push: count=%d", count)
+	logger.Infof("[Push] rid=%s V2 batch push: count=%d", rid, count)
 	if count > maxBatchPushCount && maxBatchPushCount != -1 {
-		logger.Warnf("[Push] V2 batch exceeds limit: count=%d limit=%d", count, maxBatchPushCount)
+		logger.Warnf("[Push] rid=%s V2 batch exceeds limit: count=%d limit=%d", rid, count, maxBatchPushCount)
 		return c.Status(400).JSON(failed(400, "batch push count exceeds the maximum limit: %d", maxBatchPushCount))
 	}
 
@@ -239,16 +252,19 @@ func routeDoPushV2(c *fiber.Ctx) error {
 		go func(i int, newParams map[string]interface{}) {
 			defer wg.Done()
 
-			code, err := push(newParams)
+			// Captures rid and deviceKeys[i] for consistent logging even
+			// though newParams["device_key"] already holds the key — we
+			// still mask it the same way.
+			code, err := push(rid, newParams)
 
 			mu.Lock()
 			result[i] = make(map[string]interface{})
 			if err != nil {
 				result[i]["message"] = err.Error()
-				logPushFailure("V2 batch item", deviceKeys[i], code, err)
+				logPushFailure(rid, "V2 batch item", deviceKeys[i], code, err)
 			} else {
-				logger.Infof("[Push] V2 batch item success: device_key=%s code=%d",
-					deviceKeys[i], code)
+				logger.Infof("[Push] rid=%s V2 batch item success: device_key=%s code=%d",
+					rid, logging.MaskMiddle(deviceKeys[i]), code)
 			}
 			result[i]["code"] = code
 			result[i]["device_key"] = deviceKeys[i]
@@ -256,7 +272,7 @@ func routeDoPushV2(c *fiber.Ctx) error {
 		}(i, newParams)
 	}
 	wg.Wait()
-	logger.Infof("[Push] V2 batch completed: total=%d", count)
+	logger.Infof("[Push] rid=%s V2 batch completed: total=%d", rid, count)
 	return c.JSON(data(result))
 }
 
@@ -299,7 +315,10 @@ func toInt(s string) (int, error) {
 	return n, err
 }
 
-func push(params map[string]interface{}) (int, error) {
+// push dispatches a single logical push request to one or more devices.
+// rid is the request trace id threaded through every business log so a
+// multi-platform fan-out can be correlated back to one HTTP request.
+func push(rid string, params map[string]interface{}) (int, error) {
 	msg := apns.PushMessage{
 		Body:      "",
 		Sound:     "1107",
@@ -363,7 +382,7 @@ func push(params map[string]interface{}) (int, error) {
 		delete(msg.ExtParams, "badge")
 	}
 	if msg.DeviceKey == "" {
-		logger.Errorf("[Push] device key is empty")
+		logger.Errorf("[Push] rid=%s device key is empty", rid)
 		return 400, fmt.Errorf("device key is empty")
 	}
 
@@ -371,16 +390,17 @@ func push(params map[string]interface{}) (int, error) {
 		msg.Body = "Empty Message"
 	}
 
-	logger.Infof("[Push] device lookup: device_key=%s", msg.DeviceKey)
+	maskedKey := logging.MaskMiddle(msg.DeviceKey)
+	logger.Infof("[Push] rid=%s device lookup: device_key=%s", rid, maskedKey)
 	devices, err := db.DevicesByKey(msg.DeviceKey)
 	if err != nil {
 		// Scanner probes land here with well-known names; fail quietly with
 		// 404 instead of the noisy 400 client-error path.
 		if _, probe := wellKnownProbeKeys[msg.DeviceKey]; probe {
-			logger.Infof("[Push] probe path rejected: key=%s", msg.DeviceKey)
+			logger.Infof("[Push] rid=%s probe path rejected: device_key=%s", rid, maskedKey)
 			return 404, fmt.Errorf("device not found")
 		}
-		logger.Errorf("[Push] device not found: device_key=%s err=%v", msg.DeviceKey, err)
+		logger.Errorf("[Push] rid=%s device not found: device_key=%s err=%v", rid, maskedKey, err)
 		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
 
@@ -402,14 +422,14 @@ func push(params map[string]interface{}) (int, error) {
 		targets = append(targets, di)
 	}
 	if len(targets) == 0 {
-		logger.Warnf("[Push] no valid target: device_key=%s explicit=%s", msg.DeviceKey, explicitPlatform)
+		logger.Warnf("[Push] rid=%s no valid target: device_key=%s explicit=%s", rid, maskedKey, explicitPlatform)
 		return 400, fmt.Errorf("no valid device token for key %s", msg.DeviceKey)
 	}
 	if explicitPlatform != "" {
-		logger.Infof("[Push] platform override: device_key=%s explicit=%s targets=%d",
-			msg.DeviceKey, explicitPlatform, len(targets))
+		logger.Infof("[Push] rid=%s platform override: device_key=%s explicit=%s targets=%d",
+			rid, maskedKey, explicitPlatform, len(targets))
 	} else {
-		logger.Infof("[Push] platform resolved: device_key=%s targets=%d", msg.DeviceKey, len(targets))
+		logger.Infof("[Push] rid=%s platform resolved: device_key=%s targets=%d", rid, maskedKey, len(targets))
 	}
 
 	// Record the push to the monitoring stream once per logical request,
@@ -417,10 +437,10 @@ func push(params map[string]interface{}) (int, error) {
 	gotifyPublish(&msg)
 
 	if len(targets) == 1 {
-		return pushToDevice(targets[0], &msg)
+		return pushToDevice(rid, targets[0], &msg)
 	}
 
-	logger.Infof("[Push] multi-platform fan-out: device_key=%s targets=%d", msg.DeviceKey, len(targets))
+	logger.Infof("[Push] rid=%s multi-platform fan-out: device_key=%s targets=%d", rid, maskedKey, len(targets))
 
 	// Fan out concurrently. Succeed if any one delivery succeeds; surface
 	// the last failure code only when every target failed.
@@ -433,7 +453,7 @@ func push(params map[string]interface{}) (int, error) {
 		wg.Add(1)
 		go func(di *database.DeviceInfo) {
 			defer wg.Done()
-			code, err := pushToDevice(di, &msg)
+			code, err := pushToDevice(rid, di, &msg)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -457,32 +477,36 @@ func push(params map[string]interface{}) (int, error) {
 // pushToDevice dispatches a single push to the platform-specific channel.
 // The PushMessage is shallow-copied per call so concurrent fan-out writes
 // distinct DeviceToken fields without racing on the shared struct.
-func pushToDevice(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+// rid is threaded through to the platform-specific push function for log
+// correlation.
+func pushToDevice(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	m := *msg
 	m.DeviceToken = deviceInfo.Token
 	if deviceInfo.Platform == "harmony" {
 		initHarmony()
-		logger.Infof("[Push] routing to HarmonyOS: device_key=%s", m.DeviceKey)
-		return pushToHarmony(deviceInfo, &m)
+		logger.Infof("[Push] rid=%s routing to HarmonyOS: device_key=%s", rid, logging.MaskMiddle(m.DeviceKey))
+		return pushToHarmony(rid, deviceInfo, &m)
 	}
-	logger.Infof("[Push] routing to APNs: device_key=%s", m.DeviceKey)
-	return pushToAPNs(deviceInfo, &m)
+	logger.Infof("[Push] rid=%s routing to APNs: device_key=%s", rid, logging.MaskMiddle(m.DeviceKey))
+	return pushToAPNs(rid, deviceInfo, &m)
 }
 
 // pushToAPNs sends notification via APNs
-func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+func pushToAPNs(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	code, err := pushAPNs(msg)
 
 	if code == 410 || (code == 400 && strings.Contains(err.Error(), "BadDeviceToken")) {
-		logger.Warnf("[Push] APNs invalid token, clearing: device_key=%s platform=%s code=%d",
-			msg.DeviceKey, deviceInfo.Platform, code)
+		logger.Warnf("[Push] rid=%s APNs invalid token, clearing: device_key=%s platform=%s token=%s code=%d",
+			rid, logging.MaskMiddle(msg.DeviceKey), deviceInfo.Platform, logging.MaskMiddle(msg.DeviceToken), code)
 		_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, deviceInfo.Platform)
 	}
 	if err != nil {
-		logger.Errorf("[Push] APNs failed: device_key=%s code=%d err=%v", msg.DeviceKey, code, err)
+		logger.Errorf("[Push] rid=%s APNs failed: device_key=%s token=%s code=%d err=%v",
+			rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(msg.DeviceToken), code, err)
 		return 500, fmt.Errorf("push failed: %v", err)
 	}
-	logger.Infof("[Push] APNs success: device_key=%s code=%d", msg.DeviceKey, code)
+	logger.Infof("[Push] rid=%s APNs success: device_key=%s token=%s code=%d",
+		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(msg.DeviceToken), code)
 	return 200, nil
 }
 
@@ -492,9 +516,10 @@ func pushToAPNs(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, er
 // page); the legacy V1 launch/banner/page display mapping does not apply.
 // The Bark `level` field is an APNs concept with no direct V3 equivalent,
 // so we default to actionType 0 (open app home on click).
-func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	if harmonyClient == nil {
-		logger.Errorf("[Push] HarmonyOS client not initialized: device_key=%s", msg.DeviceKey)
+		logger.Errorf("[Push] rid=%s HarmonyOS client not initialized: device_key=%s",
+			rid, logging.MaskMiddle(msg.DeviceKey))
 		return 500, fmt.Errorf("harmony push client is not initialized")
 	}
 
@@ -520,8 +545,9 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 		iconStr = icon
 	}
 
-	logger.Infof("[Push] HarmonyOS push: device_key=%s actionType=%d hasImage=%v hasData=%v",
-		msg.DeviceKey, actionType, iconStr != "", dataStr != "")
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v",
+		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
+		actionType, iconStr != "", dataStr != "")
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -540,15 +566,16 @@ func pushToHarmony(deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int,
 
 	if err != nil {
 		if hmsCode == 80200001 {
-			logger.Warnf("[Push] HarmonyOS invalid token, clearing: device_key=%s platform=%s hmsCode=%d",
-				msg.DeviceKey, deviceInfo.Platform, hmsCode)
+			logger.Warnf("[Push] rid=%s HarmonyOS invalid token, clearing: device_key=%s platform=%s token=%s hmsCode=%d",
+				rid, logging.MaskMiddle(msg.DeviceKey), deviceInfo.Platform, logging.MaskMiddle(deviceInfo.Token), hmsCode)
 			_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, deviceInfo.Platform)
 		}
-		logger.Errorf("[Push] HarmonyOS failed: device_key=%s hmsCode=%d err=%v",
-			msg.DeviceKey, hmsCode, err)
+		logger.Errorf("[Push] rid=%s HarmonyOS failed: device_key=%s token=%s hmsCode=%d err=%v",
+			rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), hmsCode, err)
 		return 500, fmt.Errorf("harmony push failed (code %d): %v", hmsCode, err)
 	}
 
-	logger.Infof("[Push] HarmonyOS success: device_key=%s hmsCode=%d", msg.DeviceKey, hmsCode)
+	logger.Infof("[Push] rid=%s HarmonyOS success: device_key=%s token=%s hmsCode=%d",
+		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), hmsCode)
 	return 200, nil
 }

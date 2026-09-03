@@ -12,6 +12,7 @@ import (
 
 	fiberlogger "github.com/gofiber/fiber/v2/middleware/logger"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
+	fiberrequestid "github.com/gofiber/fiber/v2/middleware/requestid"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -23,6 +24,21 @@ type CommonResp struct {
 	Message   string      `json:"message"`
 	Data      interface{} `json:"data,omitempty"`
 	Timestamp int64       `json:"timestamp"`
+}
+
+// RequestIDLocalsKey is the fiber.Locals key that holds the request trace id.
+const RequestIDLocalsKey = "requestid"
+
+// ridFrom extracts the request trace id from fiber.Locals. Returns "" when
+// there is no active request (tests, background goroutines).
+func ridFrom(c *fiber.Ctx) string {
+	if c == nil {
+		return ""
+	}
+	if v, ok := c.Locals(RequestIDLocalsKey).(string); ok {
+		return v
+	}
+	return ""
 }
 
 type routerFunc struct {
@@ -97,12 +113,21 @@ func (r redactingWriter) Write(p []byte) (int, error) {
 // anything mounted after it (like the logger) would never see the request.
 func routerSetupCommon(router fiber.Router) {
 	commonOnce.Do(func() {
+		// requestid MUST come BEFORE fiberlogger so each access log line can
+		// include the rid that requestid just generated.
+		router.Use(fiberrequestid.New(fiberrequestid.Config{
+			ContextKey: RequestIDLocalsKey,
+		}))
 		router.Use(fiberlogger.New(fiberlogger.Config{
 			// No ${body}: request payloads carry push content and credentials
 			// (device_token / device_key) and must not land in logs. Audit of
 			// what was pushed is served by the gotify compat history
 			// (/message). The token query param is masked by redactingWriter.
-			Format:     "${time}     INFO    ${ip} -> [${status}] ${method} ${latency} ${route} => ${url}\n",
+			// ${locals:requestid} threads the trace id through every log line
+			// so a multi-platform fan-out can be correlated back to one HTTP
+			// request — exactly the single thing operators needed when
+			// diagnosing "which push failed?".
+			Format:     "${time}     INFO    ${locals:requestid}  ${ip} -> [${status}] ${method} ${latency} ${route} => ${url}\n",
 			TimeFormat: "2006-01-02 15:04:05",
 			Output:     redactingWriter{w: os.Stdout},
 		}))

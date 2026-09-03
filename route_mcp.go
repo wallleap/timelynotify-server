@@ -10,11 +10,13 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mritd/logger"
+	"github.com/wallleap/timelynotify-server/internal/logging"
 )
 
 type contextKey string
 
 const deviceKeyCtxKey contextKey = "device_key"
+const ridCtxKey contextKey = "rid"
 
 func init() {
 	registerRoute("mcp", func(router fiber.Router) {
@@ -23,14 +25,20 @@ func init() {
 
 		// Basic endpoint - requires device_key in tool arguments
 		router.All("/mcp", rateLimitMiddleware, func(c *fiber.Ctx) error {
-			return adaptor.HTTPHandlerFunc(mcpGenericStreamable.ServeHTTP)(c)
+			rid := ridFrom(c)
+			return adaptor.HTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := context.WithValue(r.Context(), ridCtxKey, rid)
+				mcpGenericStreamable.ServeHTTP(w, r.WithContext(ctx))
+			})(c)
 		})
 
 		// Device-specific endpoint - device_key is pre-filled from URL path
 		router.All("/mcp/:device_key", rateLimitMiddleware, func(c *fiber.Ctx) error {
 			deviceKey := c.Params("device_key")
+			rid := ridFrom(c)
 			return adaptor.HTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ctx := context.WithValue(r.Context(), deviceKeyCtxKey, deviceKey)
+				ctx = context.WithValue(ctx, ridCtxKey, rid)
 				mcpSpecificStreamable.ServeHTTP(w, r.WithContext(ctx))
 			})(c)
 		})
@@ -94,16 +102,22 @@ func notifyHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallT
 		return mcp.NewToolResultError("device_key is required"), nil
 	}
 
-	args["device_key"] = deviceKey
-	logger.Infof("[MCP] notify: device_key=%s", deviceKey)
+	// Extract rid from context (injected by the fiber adaptor wrapper).
+	// May be empty when called outside an HTTP request path (tests).
+	rid, _ := ctx.Value(ridCtxKey).(string)
 
-	code, err := push(args)
+	args["device_key"] = deviceKey
+	logger.Infof("[MCP] rid=%s notify: device_key=%s", rid, logging.MaskMiddle(deviceKey))
+
+	code, err := push(rid, args)
 	if err != nil {
-		logger.Errorf("[MCP] notify failed: device_key=%s code=%d err=%v", deviceKey, code, err)
+		logger.Errorf("[MCP] rid=%s notify failed: device_key=%s code=%d err=%v",
+			rid, logging.MaskMiddle(deviceKey), code, err)
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to send notification: %v (code %d)", err, code)), nil
 	}
 
-	logger.Infof("[MCP] notify success: device_key=%s code=%d", deviceKey, code)
+	logger.Infof("[MCP] rid=%s notify success: device_key=%s code=%d",
+		rid, logging.MaskMiddle(deviceKey), code)
 	return mcp.NewToolResultText("Notification sent successfully"), nil
 }
 

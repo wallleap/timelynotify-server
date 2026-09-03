@@ -206,7 +206,7 @@ func TestClient_Send_RetryOnTokenExpired(t *testing.T) {
 
 		if atomic.LoadInt32(&callCount) == 1 {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(hmsResponse{Code: 80200003, Message: "access token expired"})
+			json.NewEncoder(w).Encode(hmsResponse{Code: json.Number("80200003"), Message: "access token expired"})
 		} else {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(struct{}{})
@@ -245,7 +245,7 @@ func TestClient_Send_DoNotRetryOnOtherError(t *testing.T) {
 		atomic.AddInt32(&callCount, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(hmsResponse{Code: 80200001, Message: "invalid token"})
+		json.NewEncoder(w).Encode(hmsResponse{Code: json.Number("80200001"), Message: "invalid token"})
 	}))
 	defer server.Close()
 
@@ -290,7 +290,7 @@ func TestClient_Send_SuccessCode80000000(t *testing.T) {
 		atomic.AddInt32(&callCount, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(hmsResponse{Code: 80000000, Message: "Success"})
+		json.NewEncoder(w).Encode(hmsResponse{Code: json.Number("80000000"), Message: "Success"})
 	}))
 	defer server.Close()
 
@@ -308,11 +308,77 @@ func TestClient_Send_SuccessCode80000000(t *testing.T) {
 	if status != http.StatusOK {
 		t.Errorf("expected status 200, got %d", status)
 	}
-	if hmsCode != 0 {
-		t.Errorf("expected hmsCode 0 for success, got %d", hmsCode)
+	if hmsCode != 80000000 {
+		t.Errorf("expected hmsCode 80000000 (real Huawei code), got %d", hmsCode)
 	}
 	if count := atomic.LoadInt32(&callCount); count != 1 {
 		t.Errorf("expected 1 call, got %d", count)
+	}
+}
+
+// TestClient_Send_StringCodeInvalidToken verifies error detection against
+// the REAL Huawei response shape, where "code" is a JSON string
+// ({"code":"80200001","msg":"invalid token"}) rather than a number.
+// Business errors arrive with HTTP 200, so a failure to parse the code
+// silently turns errors into successes.
+func TestClient_Send_StringCodeInvalidToken(t *testing.T) {
+	var callCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":"80200001","msg":"invalid token","requestId":"req-1"}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	projectID = "test-project-strcode-err"
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil)
+	if err == nil {
+		t.Fatal("expected error for string-coded invalid token, got nil")
+	}
+	if hmsCode != 80200001 {
+		t.Errorf("expected hmsCode 80200001, got %d", hmsCode)
+	}
+	if count := atomic.LoadInt32(&callCount); count != 1 {
+		t.Errorf("expected only 1 call (no retry), got %d", count)
+	}
+}
+
+// TestClient_Send_StringCodeSuccess verifies that a string-coded success
+// response (the real API shape: {"code":"80000000","msg":"Success"}) is
+// treated as success and the returned hmsCode is 80000000 so that server
+// logs correspond to what Huawei actually returned.
+func TestClient_Send_StringCodeSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":"80000000","msg":"Success","requestId":"req-2"}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	projectID = "test-project-strcode-ok"
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil)
+	if err != nil {
+		t.Fatalf("Send should succeed with string code 80000000, got error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+	if hmsCode != 80000000 {
+		t.Errorf("expected hmsCode 80000000 (real Huawei code), got %d", hmsCode)
 	}
 }
 
@@ -362,7 +428,7 @@ func TestClient_Send_InvalidToken(t *testing.T) {
 		atomic.AddInt32(&callCount, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(hmsResponse{Code: 80200001, Message: "invalid token"})
+		json.NewEncoder(w).Encode(hmsResponse{Code: json.Number("80200001"), Message: "invalid token"})
 	}))
 	defer server.Close()
 

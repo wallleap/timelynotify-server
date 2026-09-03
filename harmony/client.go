@@ -255,17 +255,34 @@ func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 	// Even if the HTTP status code is 200, the API may return a non-zero
 	// business error code in the JSON body.
 	var hmsResp hmsResponse
-	if jsonErr := json.Unmarshal(body, &hmsResp); jsonErr == nil {
+	jsonErr := json.Unmarshal(body, &hmsResp)
+	var hmsRespCode int64
+	if jsonErr == nil {
+		hmsRespCode, _ = hmsResp.Code.Int64()
+	}
+	if jsonErr == nil {
 		// Huawei returns code 80000000 for success (along with HTTP 200).
 		// Non-zero codes other than 80000000 are actual errors.
-		if hmsResp.Code != 0 && hmsResp.Code != 80000000 {
-			return resp.StatusCode, hmsResp.Code, fmt.Errorf("huawei push API error: status=%d code=%d message=%s", resp.StatusCode, hmsResp.Code, hmsResp.Message)
+		if hmsRespCode != 0 && hmsRespCode != 80000000 {
+			return resp.StatusCode, int(hmsRespCode), fmt.Errorf("huawei push API error: status=%d code=%d message=%s", resp.StatusCode, hmsRespCode, hmsResp.Message)
 		}
+	} else if resp.StatusCode != http.StatusOK {
+		// HTTP non-200 AND response body is not valid JSON — Huawei returned
+		// a plain-text error (gateway timeouts, SSL errors, etc.). Mark this
+		// distinctly so callers can tell "Huawei said code 80200001 invalid
+		// token" from "Huawei returned a 502 with an HTML error page".
+		return resp.StatusCode, 0, fmt.Errorf("huawei push API non-JSON error: status=%d body=%s", resp.StatusCode, string(body))
+	} else {
+		// HTTP 200 but body is not JSON — an edge case that shouldn't happen
+		// in normal operation, but we still need to surface it rather than
+		// silently pretending everything is fine (which is what the old code
+		// did: hmsCode=0 with no error).
+		return resp.StatusCode, 0, fmt.Errorf("huawei push API returned HTTP 200 but non-JSON body: %s", string(body))
 	}
 
 	// If HTTP status is 200 and no business error, it's a success.
 	if resp.StatusCode == http.StatusOK {
-		return resp.StatusCode, 0, nil
+		return resp.StatusCode, int(hmsRespCode), nil
 	}
 
 	return resp.StatusCode, 0, fmt.Errorf("huawei push API request failed: status=%d body=%s", resp.StatusCode, string(body))
@@ -274,6 +291,6 @@ func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 // hmsResponse models the typical error response body returned by the
 // Huawei Push Kit API.
 type hmsResponse struct {
-	Code    int    `json:"code"`
+	Code    json.Number `json:"code"`
 	Message string `json:"msg"`
 }
