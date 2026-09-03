@@ -13,7 +13,7 @@ import (
 func TestClient_Send_EmptyTokens(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClient(ts)
-	status, hmsCode, err := client.Send(nil, "title", "body", "", "", 0, nil, "", 0, 0, nil)
+	status, hmsCode, err := client.Send(nil, "title", "body", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err == nil {
 		t.Fatal("expected error for empty tokens")
 	}
@@ -57,7 +57,7 @@ func TestClient_Send_JSONPayload(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 1, nil)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 1, nil, 0)
 	if err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestClient_Send_DataJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", `{"key":"value"}`, "", 0, nil, "", 0, 0, nil, 0)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -181,7 +181,7 @@ func TestClient_Send_DataNonJSON(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "plain-string", "", 0, nil, "", 0, 0, nil, 0)
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
@@ -221,7 +221,7 @@ func TestClient_Send_RetryOnTokenExpired(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil)
+	status, hmsCode, err := client.Send([]string{"token1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("Send should succeed after retry, got err: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestClient_Send_DoNotRetryOnOtherError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"bad_token"}, "title", "body", "", "", 0, nil, "", 0, 0, nil, 0)
 	if count := atomic.LoadInt32(&callCount); count != 1 {
 		t.Errorf("expected only 1 call for non-retryable error, got %d", count)
 	}
@@ -301,7 +301,7 @@ func TestClient_Send_SuccessCode80000000(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("Send should succeed with code 80000000, got error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestClient_Send_StringCodeInvalidToken(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err == nil {
 		t.Fatal("expected error for string-coded invalid token, got nil")
 	}
@@ -370,7 +370,7 @@ func TestClient_Send_StringCodeSuccess(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	status, hmsCode, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("Send should succeed with string code 80000000, got error: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestClient_Send_HttpError(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	status, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err == nil {
 		t.Fatal("expected error for HTTP 400, got nil")
 	}
@@ -413,7 +413,7 @@ func TestClient_Send_NetworkError(t *testing.T) {
 	ts, _ := NewTokenSource()
 	client := NewClientWithURL(ts, "http://localhost:19999")
 
-	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	_, _, err := client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err == nil {
 		t.Fatal("expected error for network failure, got nil")
 	}
@@ -439,7 +439,7 @@ func TestClient_Send_InvalidToken(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	_, hmsCode, err := client.Send([]string{"bad_token"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if err == nil {
 		t.Fatal("expected error for invalid token, got nil")
 	}
@@ -471,7 +471,7 @@ func TestClient_Send_ActionType(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	client.Send([]string{"token1"}, "Hello", "World", "", "", 1, nil, "", 0, 0, nil)
+	client.Send([]string{"token1"}, "Hello", "World", "", "", 1, nil, "", 0, 0, nil, 0)
 	var payload map[string]interface{}
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
 		t.Fatalf("failed to unmarshal request: %v", err)
@@ -503,7 +503,7 @@ func TestClient_Send_PushTypeHeader(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"token1"}, "Hello", "World", "", "", 0, nil, "", 0, 0, nil, 0)
 	if capturedPushType != "0" {
 		t.Errorf("expected push-type header '0', got %q", capturedPushType)
 	}
@@ -559,7 +559,7 @@ func TestClient_Send_Image(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "https://example.com/icon.png", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "https://example.com/icon.png", 0, nil, "", 0, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -570,7 +570,7 @@ func TestClient_Send_Image(t *testing.T) {
 	}
 
 	// Empty icon must omit the image key entirely (omitempty).
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil, 0)
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify = payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
 	if _, ok := notify["image"]; ok {
@@ -596,7 +596,7 @@ func TestClient_Send_BadgeSetNumZero(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(0), "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(0), "", 0, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -636,7 +636,7 @@ func TestClient_Send_BadgeDefault(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -675,7 +675,7 @@ func TestClient_Send_BadgeWithSetNum(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(99), "", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, intPtr(99), "", 0, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -767,7 +767,7 @@ func TestClient_Send_Sound(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 30, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 30, 0, nil, 0)
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
@@ -783,7 +783,7 @@ func TestClient_Send_Sound(t *testing.T) {
 	}
 
 	// An explicit .wav name must be kept unchanged (no double suffix).
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "alert.WAV", 10, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "alert.WAV", 10, 0, nil, 0)
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify = payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
 	if notify["sound"] != "alert.WAV" {
@@ -817,7 +817,7 @@ func TestClient_Send_SoundOmitted(t *testing.T) {
 	}
 
 	// Duration without sound must be dropped entirely.
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 30, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 30, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -852,7 +852,7 @@ func TestClient_Send_SoundDurationClamped(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 999, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 999, 0, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -866,7 +866,7 @@ func TestClient_Send_SoundDurationClamped(t *testing.T) {
 	}
 
 	// Zero duration with sound: field omitted (default 30s truncation).
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 0, 0, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "minuet", 0, 0, nil, 0)
 	_ = json.Unmarshal(capturedBody, &payload)
 	notify = payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
 	if notify["sound"] != "minuet.mp3" {
@@ -912,7 +912,7 @@ func TestClient_Send_ForegroundShow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, tc.in, nil)
+			_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, tc.in, nil, 0)
 			var payload map[string]interface{}
 			if err := json.Unmarshal(capturedBody, &payload); err != nil {
 				t.Fatalf("failed to unmarshal request: %v", err)
@@ -949,7 +949,7 @@ func TestClient_Send_InboxContent(t *testing.T) {
 	}
 
 	lines := []string{"1. 通知栏消息样式", "2. 通知栏消息提醒方式和展示方式", "3. 通知栏消息语言本地化"}
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, lines)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, lines, 0)
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
@@ -995,7 +995,7 @@ func TestClient_Send_InboxContentOmitted(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, nil)
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, nil, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -1029,7 +1029,7 @@ func TestClient_Send_InboxContentSingleLine(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, []string{"only line"})
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, []string{"only line"}, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -1065,7 +1065,7 @@ func TestClient_Send_InboxContentEmptyArray(t *testing.T) {
 		Transport: &rewriteTransport{target: server.URL},
 	}
 
-	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, []string{})
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, []string{}, 0)
 
 	var payload map[string]interface{}
 	_ = json.Unmarshal(capturedBody, &payload)
@@ -1076,5 +1076,107 @@ func TestClient_Send_InboxContentEmptyArray(t *testing.T) {
 	}
 	if _, ok := notify["style"]; ok {
 		t.Errorf("expected style omitted for empty inbox, got %v", notify["style"])
+	}
+}
+
+// TestClient_Send_NotifyId verifies that a non-zero notifyId is serialized
+// as notification.notifyId in the V3 body — notifications sharing the same
+// notifyId replace each other (Huawei's notification grouping mechanism).
+func TestClient_Send_NotifyId(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, nil, 12345)
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("failed to unmarshal request: %v", err)
+	}
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	if got, ok := notify["notifyId"].(float64); !ok || int(got) != 12345 {
+		t.Errorf("expected notifyId=12345, got %v", notify["notifyId"])
+	}
+}
+
+// TestClient_Send_NotifyIdOmitted verifies that notifyId=0 is omitted via
+// omitempty so Push Kit auto-generates a unique identifier (the default
+// behavior when the field is absent).
+func TestClient_Send_NotifyIdOmitted(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, nil, 0)
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	if _, ok := notify["notifyId"]; ok {
+		t.Errorf("expected notifyId omitted when 0, got %v", notify["notifyId"])
+	}
+}
+
+// TestClient_Send_NotifyIdWithInbox verifies that notifyId and inboxContent
+// coexist in the same notification — a non-zero notifyId does not interfere
+// with the inbox style=3 pairing.
+func TestClient_Send_NotifyIdWithInbox(t *testing.T) {
+	var capturedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	lines := []string{"line1", "line2"}
+	_, _, _ = client.Send([]string{"t1"}, "title", "body", "", "", 0, nil, "", 0, 1, lines, 99)
+
+	var payload map[string]interface{}
+	_ = json.Unmarshal(capturedBody, &payload)
+	notify := payload["payload"].(map[string]interface{})["notification"].(map[string]interface{})
+
+	if got, ok := notify["notifyId"].(float64); !ok || int(got) != 99 {
+		t.Errorf("expected notifyId=99, got %v", notify["notifyId"])
+	}
+	if style, ok := notify["style"].(float64); !ok || int(style) != 3 {
+		t.Errorf("expected style=3 with inboxContent, got %v", notify["style"])
 	}
 }

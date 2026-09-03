@@ -18,6 +18,12 @@ import (
 type Store interface {
 	// Add persists a message, assigns a monotonic ID and returns it.
 	Add(m *Message) (uint64, error)
+	// UpsertByExtraID finds the first message (newest-first) whose extras.id
+	// matches extraID AND belongs to device, overwrites its content in place
+	// (preserving the bbolt ID), and returns (id, true, nil). If no match is
+	// found it creates a new message like Add and returns (id, false, nil).
+	// When extraID is empty it delegates to Add (no overwrite semantics).
+	UpsertByExtraID(device, extraID string, m *Message) (uint64, bool, error)
 	// Recent returns up to limit messages with ID < since, ordered by ID
 	// descending (newest first). since==0 disables the filter.
 	Recent(limit int, since uint64) ([]Message, error)
@@ -144,6 +150,88 @@ func (s *bboltStore) Add(m *Message) (uint64, error) {
 		return mb.Put(keyCount, uint64Bytes(count))
 	})
 	return id, err
+}
+
+// extraIDOf extracts the "id" field from a message's extras as a string.
+// V2 JSON numeric ids arrive as float64 in extras; fmt.Sprint normalizes
+// both string and numeric forms so the match is type-agnostic.
+func extraIDOf(m *Message) string {
+	if m.Extras == nil {
+		return ""
+	}
+	v, ok := m.Extras["id"]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+func (s *bboltStore) UpsertByExtraID(device, extraID string, m *Message) (uint64, bool, error) {
+	if extraID == "" || device == "" {
+		id, err := s.Add(m)
+		return id, false, err
+	}
+	var matchID uint64
+	var found bool
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketMessages))
+		mb := tx.Bucket([]byte(bucketMeta))
+		c := b.Cursor()
+		// Scan newest-first for an existing message matching device + extras.id.
+		_, _ = c.Seek(uint64Bytes(^uint64(0)))
+		k, v := c.Prev()
+		for k != nil {
+			var msg Message
+			if err := json.Unmarshal(v, &msg); err == nil {
+				msg.ID = bytesUint64(k)
+				if msg.SourceDevice() == device && extraIDOf(&msg) == extraID {
+					matchID = msg.ID
+					found = true
+					break
+				}
+			}
+			k, v = c.Prev()
+		}
+		if found {
+			// Overwrite the existing message content, preserving the bbolt ID
+			// so stream subscribers and /message readers see an update, not a
+			// new entry.
+			m.ID = matchID
+			data, err := json.Marshal(m)
+			if err != nil {
+				return err
+			}
+			return b.Put(uint64Bytes(matchID), data)
+		}
+		// Not found: create a new message (same logic as Add).
+		seq, err := b.NextSequence()
+		if err != nil {
+			return err
+		}
+		m.ID = seq
+		data, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		if err := b.Put(uint64Bytes(seq), data); err != nil {
+			return err
+		}
+		count := metaUint64(mb, keyCount) + 1
+		if count > uint64(s.max) {
+			c := b.Cursor()
+			if k, _ := c.First(); k != nil {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
+			}
+			count--
+		}
+		return mb.Put(keyCount, uint64Bytes(count))
+	})
+	if found {
+		return matchID, true, err
+	}
+	return m.ID, false, err
 }
 
 func (s *bboltStore) Recent(limit int, since uint64) ([]Message, error) {
@@ -444,6 +532,37 @@ func (s *memoryStore) Add(m *Message) (uint64, error) {
 		delete(s.msgs, old)
 	}
 	return id, nil
+}
+
+func (s *memoryStore) UpsertByExtraID(device, extraID string, m *Message) (uint64, bool, error) {
+	if extraID == "" || device == "" {
+		id, err := s.Add(m)
+		return id, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Scan newest-first for an existing message matching device + extras.id.
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		msg := s.msgs[id]
+		if msg.SourceDevice() == device && extraIDOf(&msg) == extraID {
+			m.ID = id
+			s.msgs[id] = *m
+			return id, true, nil
+		}
+	}
+	// Not found: create a new message (same logic as Add).
+	s.seq++
+	id := s.seq
+	m.ID = id
+	s.msgs[id] = *m
+	s.order = append(s.order, id)
+	if len(s.order) > s.max {
+		old := s.order[0]
+		s.order = s.order[1:]
+		delete(s.msgs, old)
+	}
+	return id, false, nil
 }
 
 func (s *memoryStore) Recent(limit int, since uint64) ([]Message, error) {

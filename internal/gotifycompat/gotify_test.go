@@ -1007,3 +1007,129 @@ func TestDeleteAllWhenEmpty(t *testing.T) {
 		t.Fatalf("first id after empty DeleteAll should be 1, got %+v", msgs)
 	}
 }
+
+// TestPublishWithID_Overwrites verifies that publishing with the same
+// extras.id overwrites the existing message for that device instead of
+// appending a new entry. The bbolt ID is preserved so stream subscribers
+// and /message readers see an update, not a duplicate.
+func TestPublishWithID_Overwrites(t *testing.T) {
+	svc := buildTestService(t, "")
+	extras := map[string]interface{}{"device_key": "d1", "id": "msg-1"}
+	if err := svc.Publish("title-old", "body-old", 0, extras); err != nil {
+		t.Fatalf("first Publish: %v", err)
+	}
+	msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message, got %d", len(msgs))
+	}
+	firstID := msgs[0].ID
+	if msgs[0].Title != "title-old" || msgs[0].Message != "body-old" {
+		t.Fatalf("unexpected first message: %+v", msgs[0])
+	}
+
+	// Second publish with the same extras.id should overwrite in place.
+	extras2 := map[string]interface{}{"device_key": "d1", "id": "msg-1"}
+	if err := svc.Publish("title-new", "body-new", 1, extras2); err != nil {
+		t.Fatalf("second Publish: %v", err)
+	}
+	msgs, _ = svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message after overwrite, got %d", len(msgs))
+	}
+	if msgs[0].ID != firstID {
+		t.Errorf("ID should be preserved (%d), got %d", firstID, msgs[0].ID)
+	}
+	if msgs[0].Title != "title-new" || msgs[0].Message != "body-new" {
+		t.Errorf("content not overwritten: %+v", msgs[0])
+	}
+	if msgs[0].Priority != 1 {
+		t.Errorf("priority not updated: %d", msgs[0].Priority)
+	}
+}
+
+// TestPublishWithID_NewWhenNoMatch verifies that publishing with an extras.id
+// that doesn't match any existing message creates a new entry (like Add).
+func TestPublishWithID_NewWhenNoMatch(t *testing.T) {
+	svc := buildTestService(t, "")
+	if err := svc.Publish("t1", "b1", 0, map[string]interface{}{"device_key": "d1", "id": "x1"}); err != nil {
+		t.Fatalf("Publish x1: %v", err)
+	}
+	if err := svc.Publish("t2", "b2", 0, map[string]interface{}{"device_key": "d1", "id": "x2"}); err != nil {
+		t.Fatalf("Publish x2: %v", err)
+	}
+	msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 2 {
+		t.Fatalf("want 2 distinct messages, got %d", len(msgs))
+	}
+}
+
+// TestPublishWithID_PerDevice verifies that the same extras.id on different
+// devices are independent — overwriting on d1 must not touch d2's message.
+func TestPublishWithID_PerDevice(t *testing.T) {
+	svc := buildTestService(t, "")
+	if err := svc.Publish("t-d1", "b1", 0, map[string]interface{}{"device_key": "d1", "id": "shared"}); err != nil {
+		t.Fatalf("Publish d1: %v", err)
+	}
+	if err := svc.Publish("t-d2", "b2", 0, map[string]interface{}{"device_key": "d2", "id": "shared"}); err != nil {
+		t.Fatalf("Publish d2: %v", err)
+	}
+
+	// Overwrite d1's message — d2 must remain untouched.
+	if err := svc.Publish("t-d1-v2", "b1-v2", 0, map[string]interface{}{"device_key": "d1", "id": "shared"}); err != nil {
+		t.Fatalf("Publish d1 v2: %v", err)
+	}
+	d1msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+	if len(d1msgs) != 1 || d1msgs[0].Title != "t-d1-v2" {
+		t.Errorf("d1 not overwritten: %+v", d1msgs)
+	}
+	d2msgs, _ := svc.MessagesByDevice("d2", 100, 0)
+	if len(d2msgs) != 1 || d2msgs[0].Title != "t-d2" {
+		t.Errorf("d2 should be untouched: %+v", d2msgs)
+	}
+}
+
+// TestPublishWithIDOnMemoryStore verifies the same overwrite behavior holds
+// on the degraded in-memory store fallback.
+func TestPublishWithIDOnMemoryStore(t *testing.T) {
+	svc := buildMemoryFallbackService(t)
+	extras := map[string]interface{}{"device_key": "d1", "id": "mem-1"}
+	if err := svc.Publish("old", "b-old", 0, extras); err != nil {
+		t.Fatalf("first Publish: %v", err)
+	}
+	msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message, got %d", len(msgs))
+	}
+	firstID := msgs[0].ID
+
+	if err := svc.Publish("new", "b-new", 0, map[string]interface{}{"device_key": "d1", "id": "mem-1"}); err != nil {
+		t.Fatalf("second Publish: %v", err)
+	}
+	msgs, _ = svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message after overwrite, got %d", len(msgs))
+	}
+	if msgs[0].ID != firstID {
+		t.Errorf("ID should be preserved (%d), got %d", firstID, msgs[0].ID)
+	}
+	if msgs[0].Title != "new" {
+		t.Errorf("title not overwritten: %s", msgs[0].Title)
+	}
+}
+
+// TestPublishWithoutID_Appends verifies that publishing without an extras.id
+// always creates a new message (the original behavior), even when a message
+// with the same content exists.
+func TestPublishWithoutID_Appends(t *testing.T) {
+	svc := buildTestService(t, "")
+	if err := svc.Publish("t", "b", 0, map[string]interface{}{"device_key": "d1"}); err != nil {
+		t.Fatalf("Publish 1: %v", err)
+	}
+	if err := svc.Publish("t", "b", 0, map[string]interface{}{"device_key": "d1"}); err != nil {
+		t.Fatalf("Publish 2: %v", err)
+	}
+	msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+	if len(msgs) != 2 {
+		t.Fatalf("without id, each publish should append; want 2, got %d", len(msgs))
+	}
+}

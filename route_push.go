@@ -70,11 +70,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string, notifyId int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow, inboxContent)
+	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow, inboxContent, notifyId)
 }
 
 func init() {
@@ -457,6 +457,18 @@ func push(rid string, params map[string]interface{}) (int, error) {
 		}
 		delete(msg.ExtParams, "badge")
 	}
+	// id normalization: V2 JSON numeric ids arrive as float64 and bypass the
+	// string case above (which sets msg.Id). Convert any type to string so
+	// HarmonyOS notifyId parsing (toInt(msg.Id)) and APNs collapse-id both
+	// work; also normalize the ExtParams value to string for consistent
+	// downstream matching (gotify overwrite uses fmt.Sprint on extras["id"]).
+	if v, ok := msg.ExtParams["id"]; ok {
+		s := fmt.Sprint(v)
+		if msg.Id == "" {
+			msg.Id = s
+		}
+		msg.ExtParams["id"] = s
+	}
 	// Numeric soundDuration for JSON numeric types (float64/int) bypassed
 	// the string switch above, and JSON keys keep their original casing
 	// there (e.g. "soundDuration"). Normalize to int under the lowercase
@@ -698,9 +710,19 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		inboxContent = toInboxStrings(v)
 	}
 
-	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d inboxLines=%d",
+	// Bark `id` is the notification folding ID on iOS (apns-collapse-id).
+	// On HarmonyOS V3 it maps to notification.notifyId (int); a non-numeric
+	// or empty id yields 0 (omitted — Push Kit auto-generates one).
+	var notifyId int
+	if msg.Id != "" {
+		if n, err := toInt(msg.Id); err == nil {
+			notifyId = n
+		}
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d inboxLines=%d notifyId=%d",
 		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
-		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow, len(inboxContent))
+		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow, len(inboxContent), notifyId)
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -719,6 +741,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		soundDuration,
 		foregroundShow,
 		inboxContent,
+		notifyId,
 	)
 
 	if err != nil {

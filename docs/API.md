@@ -160,14 +160,14 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 
 **请求**
 
-| 字段          | 类型                        | 必填  | 说明                                     |
-| ----------- | ------------------------- | --- | -------------------------------------- |
-| device\_key | string                    | 是\* | 目标设备 key（与 `device_keys` 二选一）          |
-| body        | string                    | 否   | 通知正文（全空时自动填 `"Empty Message"`）         |
-| title       | string                    | 否   | 通知标题（字体比正文大）                           |
-| subtitle    | string                    | 否   | 通知副标题                                  |
-| platform    | string                    | 否   | 收窄到指定平台：`ios` 或 `harmony`。省略则扇出到所有有效平台 |
-| 其他 Push 字段  | 见 [Push 字段参考](#push-字段参考) | 否   | level/sound/badge/icon/url 等           |
+| 字段           | 类型                                       | 必填 | 说明                                                         |
+| -------------- | ------------------------------------------ | ---- | ------------------------------------------------------------ |
+| device\_key    | string                                     | 是\* | 目标设备 key（与 `device_keys` 二选一）                      |
+| body           | string                                     | 否   | 通知正文（全空时自动填 `"Empty Message"`）                   |
+| title          | string                                     | 否   | 通知标题（字体比正文大），为空时，鸿蒙端自动填 `"订阅通知"`、iOS 端自动填 `"Bark"` |
+| subtitle       | string                                     | 否   | 通知副标题，设置了 `subtitle` 之后 `title` 和 `body` 必填    |
+| platform       | string                                     | 否   | 收窄到指定平台：`ios` 或 `harmony`。省略则扇出到所有有效平台 |
+| 其他 Push 字段 | 见 [Push 其它字段参考](#push-其它字段参考) | 否   | level/sound/badge/icon/url 等                                |
 
 \* 单设备推送必填 `device_key`，批量推送改用 `device_keys`。
 
@@ -209,10 +209,10 @@ curl -X POST "http://127.0.0.1:18080/push" \
 
 **请求**
 
-| 字段           | 类型                        | 必填 | 说明              |
-| ------------ | ------------------------- | -- | --------------- |
-| device\_keys | string\[] 或逗号分隔字符串        | 是  | 目标设备 key 列表     |
-| 其他 Push 字段   | 见 [Push 字段参考](#push-字段参考) | 否  | 公共参数，对每个设备都推送一份 |
+| 字段           | 类型                                       | 必填 | 说明                           |
+| -------------- | ------------------------------------------ | ---- | ------------------------------ |
+| device\_keys   | string\[] 或逗号分隔字符串                 | 是   | 目标设备 key 列表              |
+| 其他 Push 字段 | 见 [Push 其它字段参考](#push-其它字段参考) | 否   | 公共参数，对每个设备都推送一份 |
 
 ```sh
 curl -X POST "http://127.0.0.1:18080/push" \
@@ -244,12 +244,12 @@ curl -X POST "http://127.0.0.1:18080/push" \
 
 老式 Bark 客户端走路径参数，段顺序固定。GET/POST 均支持：
 
-| 路径形态                                  | 说明                              |
-| ------------------------------------- | ------------------------------- |
+| 路径形态                              | 说明                                       |
+| ------------------------------------- | ------------------------------------------ |
 | `/:device_key`                        | 仅 key，正文为空（自动填 "Empty Message"） |
-| `/:device_key/:body`                  | key + 正文                        |
-| `/:device_key/:title/:body`           | key + 标题 + 正文                   |
-| `/:device_key/:title/:subtitle/:body` | key + 标题 + 副标题 + 正文             |
+| `/:device_key/:body`                  | key + 正文                                 |
+| `/:device_key/:title/:body`           | key + 标题 + 正文                          |
+| `/:device_key/:title/:subtitle/:body` | key + 标题 + 副标题 + 正文                 |
 
 路径段会 `url.QueryUnescape` 解码，其余参数可走 query 或 form-data。
 
@@ -263,37 +263,36 @@ curl -X POST "http://127.0.0.1:18080/ynJ5Ft4atkMkWeo2PAvFhF/hello?sound=minuet&g
 
 **响应**：同 [V2 单设备推送](#post-pushv2-单设备推送)。
 
-### Push 字段参考
+### Push 其它字段参考
+
+前面已提及的 `device_key`、`title`、`subtitle`、`body`，`device_keys` 不再重复
 
 V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
-| 字段           | 类型           | 说明                                                                                         |
-| ------------ | ------------ | ------------------------------------------------------------------------------------------ |
-| id           | string       | 通知折叠 ID（APNs `apns-collapse-id`）                                                           |
-| device\_key  | string       | 目标设备 key（单设备推送必填）                                                                          |
-| device\_keys | array/string | 批量推送目标列表（V2 专用）                                                                            |
-| platform     | string       | 收窄平台：`ios` 或 `harmony`；省略扇出到所有有效平台                                                         |
-| title        | string       | 通知标题                                                                                       |
-| subtitle     | string       | 通知副标题                                                                                      |
-| body         | string       | 通知正文                                                                                       |
-| level        | string       | APNs 优先级：`critical`/`active`/`timeSensitive`/`passive`；鸿蒙映射见 [HarmonyOS 推送](#harmonyos-推送) |
-| volume       | string       | critical 通知铃声音量                                                                            |
-| badge        | integer      | App 图标角标数                                                                                  |
-| call         | string       | `1` 时铃声持续播放 30 秒                                                                           |
-| autoCopy     | string       | `1` 时自动复制                                                                                  |
-| copy         | string       | 待复制的文本                                                                                     |
-| sound        | string       | 铃声名（自动补 `.caf` 后缀），见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds)        |
-| icon         | string       | 图标 URL（iOS 15+）                                                                            |
-| image        | string       | 图片 URL（iOS 15+）                                                                            |
-| group        | string       | 通知分组                                                                                       |
-| ciphertext   | string       | 加密推送的密文                                                                                    |
-| markdown     | string       | Markdown 正文，覆盖 `body`                                                                      |
-| isArchive    | string       | `1` 时由 App 归档                                                                              |
-| ttl          | integer      | 归档消息存活秒数，过期自动删除                                                                            |
-| url          | string       | 点击通知跳转的 URL                                                                                |
-| action       | string       | `none` 时点击无动作                                                                              |
-| delete       | string       | `1` 时静默推送（不展示，ContentAvailable）                                                            |
-| data         | string       | 鸿蒙特有：自定义数据载荷                                                                               |
+| 字段           | 类型       | iOS                                                          | HarmonyOS                                                    |
+| -------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| id             | string     | 使用相同的ID值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2, bark-server v2.2.5 以上，Json传参需使用字符串类型<br/>传 `id` 时监控流（`/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识） |
+| level          | string     | APNs 优先级：`critical`/`active`/`timeSensitive`/`passive`   | -                                                            |
+| volume         | string     | critical 通知铃声音量                                        | -                                                            |
+| badge          | integer    | App 图标角标数，值为 `0` 时清除角标                          | 同 iOS                                                       |
+| call           | string     | `1` 时铃声持续播放 30 秒                                     | -                                                            |
+| autoCopy       | string     | `1` 时自动复制                                               | -                                                            |
+| copy           | string     | 待复制的文本                                                 | -                                                            |
+| sound          | string     | 铃声名（自动补 `.caf` 后缀），见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds) | 铃声名与 Bark 一致，自动补 `.mp3` 后缀（已带 `.mp3`/`.wav`/`.mpeg` 后缀则保持不变，`.caf` 自动转 `.mp3`）；铃声文件需放在应用 `/resources/rawfile` 目录，且需在 AGC 申请「自定义铃声权益」，`category=MARKETING` 时自定义铃声无效 |
+| soundDuration  | integer    | -                                                            | 通知铃声时长（单位秒），仅同时传了 `sound` 才生效，取值范围 `[1, 60]`（超出自动截断为 60），铃声不足该时长会循环播放；不传时铃声超过 30 秒截断 |
+| icon           | string     | 图标 URL（iOS 15+）                                          | 华为会自动校验图片是否合规，必须是 HTTPS URL，支持图片格式为PNG、JPG、JPEG、BMP、WEBP，图片像素的总字节数不超过192KB，若超过则图片不展示 |
+| image          | string     | 图片 URL（iOS 15+）                                          | -                                                            |
+| group          | string     | 通知分组                                                     |                                                              |
+| ciphertext     | string     | 加密推送的密文                                               | -                                                            |
+| markdown       | string     | Markdown 正文，覆盖 `body`                                   |                                                              |
+| isArchive      | string     | `1` 时由 App 归档                                            | -                                                            |
+| ttl            | integer    | 归档消息存活秒数，过期自动删除                               | -                                                            |
+| url            | string     | 点击通知跳转的 URL                                           | -                                                            |
+| action         | string     | 传 "alert" 时，点击推送跳转到APP时会弹出操作弹窗             | 目前固定点击跳转应用首页                                     |
+| delete         | string     | `1` 时静默推送（不展示，ContentAvailable）                   | -                                                            |
+| foregroundShow | `string`   | -                                                            | 默认 `1`，应用在前后台都展示通知消息，其它值应用在前台时不通知 |
+| inboxContent   | `string[]` | -                                                            | 多行消息（传了替换 `body`）：例<br />`"inboxContent": ["1. 通知栏消息样式", "2. 通知栏消息提醒方式和展示方式", "3. 通知栏消息语言本地化"]`；传该字段时自动携带 `style=3`（收件箱样式），无需单独传 `style` |
+| data           | `string`   | -                                                            | 自定义数据载荷                                               |
 
 > 表外字段原样透传为 APNs 自定义字段（`payload.custom`），key 转小写。
 
@@ -317,44 +316,6 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 3. **URL 路径参数（path）** — V1 路径段最高
 
 例：`POST /:device_key/:title/:body?sound=minuet` body `{"sound":"alarm"}` 最终 `sound=minuet`（query 覆盖 body）+ `title`/`body` 来自路径（最高）。
-
-### HarmonyOS 推送
-
-推送鸿蒙设备与 iOS 使用完全相同的 API。区别在 `level` 字段映射到华为 `click_action`：
-
-| Bark level                   | 华为 click\_action | 说明           |
-| ---------------------------- | ---------------- | ------------ |
-| 不指定（默认）                      | `launch`         | 全屏通知，需用户立即处理 |
-| `critical` / `timeSensitive` | `launch`         | 全屏通知         |
-| `active`                     | `banner`         | 横幅通知         |
-| 其他（如 `passive`）              | `page`           | 普通通知         |
-
-> 华为 V3 场景化消息：`category` 默认 `SUBSCRIPTION`（需在 AGC 申请「通知消息自分类权益」并通过审核，否则降级 `MARKETING` 受每设备每日 2/5 条频控且自定义铃声失效）；`foregroundShow` 默认 `true`；`pushOptions.ttl` 默认 86400。详见 [AGENTS.md](../AGENTS.md) 的 Conventions 章节。
-
-完整流程示例：
-
-```sh
-# 1. 注册鸿蒙设备
-curl -X POST "http://127.0.0.1:18080/register" \
-     -H 'Content-Type: application/json' \
-     -d '{
-  "device_key": "my-harmony-device",
-  "device_token": "<harmony_push_token>",
-  "platform": "harmony"
-}'
-
-# 2. 推送（与 iOS 推送格式完全相同）
-curl -X POST "http://127.0.0.1:18080/push" \
-     -H 'Content-Type: application/json' \
-     -d '{
-  "device_key": "my-harmony-device",
-  "title": "鸿蒙测试通知",
-  "body": "这是一条鸿蒙推送测试消息",
-  "level": "active"
-}'
-```
-
-***
 
 ## 设备注册
 
@@ -620,7 +581,8 @@ curl -X POST "http://127.0.0.1:18080/mcp/my-device" \
 | volume      | number | 否                               | critical 通知音量，0-10，默认 5                       |
 | badge       | number | 否                               | App 图标角标数                                     |
 | call        | string | 否                               | `1` 时铃声持续 30 秒                                |
-| sound       | string | 否                               | 铃声名                                           |
+| sound       | string | 否                               | 铃声名（iOS 自动补 `.caf`，鸿蒙自动补 `.mp3`）               |
+| soundDuration | number | 否                             | 鸿蒙通知铃声时长（秒），1-60，需配合 `sound` 使用               |
 | icon        | string | 否                               | 图标 URL                                        |
 | image       | string | 否                               | 图片 URL                                        |
 | group       | string | 否                               | 通知分组                                          |

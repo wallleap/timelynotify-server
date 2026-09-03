@@ -109,6 +109,12 @@ type Notification struct {
 	// 1 = big text, 2 = big picture, 3 = inbox. Send sets it to 3 when
 	// InboxContent is non-empty; it stays 0 (omitted) otherwise.
 	Style int `json:"style,omitempty"`
+	// NotifyId is the V3 notification unique identifier (integer, range
+	// [0, 2147483647]). Notifications sharing the same notifyId replace
+	// each other; -1 or omitted lets Push Kit auto-generate one. Mapped
+	// from the Bark `id` param (parsed to int; non-numeric values are
+	// dropped). Zero is omitted (auto-generate) via omitempty.
+	NotifyId int `json:"notifyId,omitempty"`
 }
 
 // ClickAction mirrors the V3 clickAction object. actionType 0 opens the
@@ -173,11 +179,15 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 // inboxContent: optional V3 notification.inboxContent multi-line body.
 // When non-empty, Style is auto-set to 3 (inbox style) per the V3 docs;
 // pass nil/empty to omit both fields.
+// notifyId: optional V3 notification.notifyId (int, range [0, 2147483647]).
+// Notifications with the same notifyId replace each other. Pass 0 to
+// omit (let Push Kit auto-generate); the caller maps Bark `id` (string)
+// to int — non-numeric values yield 0 (omitted).
 //
 // It returns the Huawei HTTP status code, the server's error code (if
 // any), and an error (wrapped with context). On token-expired errors it
 // invalidates the local cache and retries exactly once.
-func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string) (httpStatus int, hmsCode int, err error) {
+func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string, notifyId int) (httpStatus int, hmsCode int, err error) {
 	if len(targetTokens) == 0 {
 		return 0, 0, fmt.Errorf("no target tokens provided")
 	}
@@ -218,6 +228,7 @@ func (c *Client) Send(targetTokens []string, title, body, data, icon string, act
 		ForegroundShow: foregroundShow == 1,
 		Sound:          sound,
 		SoundDuration:  soundDur,
+		NotifyId:       notifyId,
 	}
 	// V3 requires style=3 (inbox) whenever inboxContent is present;
 	// omitting style silently degrades to the default single-line layout.

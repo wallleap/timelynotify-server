@@ -204,7 +204,16 @@ func (s *Service) Publish(title, body string, priority int, extras map[string]in
 		Date:      time.Now().Format(time.RFC3339Nano),
 		DeviceKey: deviceOf(extras),
 	}
-	id, err := s.store.Add(&m)
+	// When extras carries an "id" field, overwrite the existing message for
+	// the same device + extras.id (if any) instead of appending a new entry.
+	// This lets callers push "updates" to a logical message by reusing the id.
+	var id uint64
+	var err error
+	if eid := extraIDOf(&m); eid != "" && m.DeviceKey != "" {
+		id, _, err = s.store.UpsertByExtraID(m.DeviceKey, eid, &m)
+	} else {
+		id, err = s.store.Add(&m)
+	}
 	if err != nil {
 		return err
 	}
