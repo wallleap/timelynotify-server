@@ -157,11 +157,15 @@ func NewClientWithURL(ts *TokenSource, baseURL string) *Client {
 // for the system default ringtone.
 // soundDuration: ringtone playback duration in seconds, clamped to
 // [1, 60]; only sent when sound is non-empty.
+// foregroundShow: controls the V3 notification.foregroundShow field.
+// 1 → true (display notifications while the app is in the foreground),
+// any other value → false. The caller (route_push.go) is responsible
+// for defaulting to 1 when the user does not pass the param.
 //
 // It returns the Huawei HTTP status code, the server's error code (if
 // any), and an error (wrapped with context). On token-expired errors it
 // invalidates the local cache and retries exactly once.
-func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int, sound string, soundDuration int) (httpStatus int, hmsCode int, err error) {
+func (c *Client) Send(targetTokens []string, title, body, data, icon string, actionType int, badgeNum *int, sound string, soundDuration int, foregroundShow int) (httpStatus int, hmsCode int, err error) {
 	if len(targetTokens) == 0 {
 		return 0, 0, fmt.Errorf("no target tokens provided")
 	}
@@ -201,7 +205,7 @@ func (c *Client) Send(targetTokens []string, title, body, data, icon string, act
 				Image:          icon,
 				Badge:          badge,
 				ClickAction:    clickAction,
-				ForegroundShow: true,
+				ForegroundShow: foregroundShow == 1,
 				Sound:          sound,
 				SoundDuration:  soundDur,
 			},

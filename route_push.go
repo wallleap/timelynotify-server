@@ -70,11 +70,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration)
+	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow)
 }
 
 func init() {
@@ -354,6 +354,13 @@ func push(rid string, params map[string]interface{}) (int, error) {
 				if n, err := toInt(val); err == nil {
 					msg.ExtParams["soundduration"] = n
 				}
+			case "foregroundshow":
+				// HarmonyOS V3 foregroundShow: "1" displays notifications while
+				// the app is in the foreground; any other value (including
+				// "0"/"false"/non-numeric) suppresses foreground display.
+				// Store the raw string here; the normalization block below
+				// converts it (and JSON numeric variants) to int.
+				msg.ExtParams["foregroundShow"] = val
 			case "badge":
 				if n, err := toInt(val); err == nil {
 					msg.Badge = n
@@ -400,6 +407,21 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			delete(msg.ExtParams, k)
 			if n, err := toInt(fmt.Sprint(v)); err == nil {
 				msg.ExtParams["soundduration"] = n
+			}
+		}
+	}
+	// Numeric foregroundShow for JSON numeric types (float64/int) bypassed
+	// the string switch above, and JSON keys keep their original casing
+	// there (e.g. "foregroundShow"). Normalize to int under the canonical
+	// key; non-numeric values map to 0 (false). V3 semantics: 1 → true,
+	// any other value → false. pushToHarmony defaults to 1 when absent.
+	for _, k := range []string{"foregroundShow", "foregroundshow"} {
+		if v, ok := msg.ExtParams[k]; ok {
+			delete(msg.ExtParams, k)
+			if n, err := toInt(fmt.Sprint(v)); err == nil {
+				msg.ExtParams["foregroundShow"] = n
+			} else {
+				msg.ExtParams["foregroundShow"] = 0
 			}
 		}
 	}
@@ -580,9 +602,22 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		soundDuration, _ = toInt(fmt.Sprint(v))
 	}
 
-	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v",
+	// Bark `foregroundShow` controls the V3 notification.foregroundShow
+	// field: 1 → true (display notifications while the app is in the
+	// foreground), any other value → false. Default 1 when absent; the
+	// push() normalization block stores an int under the canonical key.
+	foregroundShow := 1
+	if v, ok := msg.ExtParams["foregroundShow"]; ok {
+		if n, err := toInt(fmt.Sprint(v)); err == nil {
+			foregroundShow = n
+		} else {
+			foregroundShow = 0
+		}
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d",
 		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
-		actionType, iconStr != "", dataStr != "", soundStr != "")
+		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow)
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -599,6 +634,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		badgeArg,
 		soundStr,
 		soundDuration,
+		foregroundShow,
 	)
 
 	if err != nil {
