@@ -1,11 +1,32 @@
 <a name="unreleased"></a>
 
+## [v0.6.0](https://github.com/wallleap/timelynotify-server/compare/v0.5.3...v0.6.0)
+
+> 2026-09-03
+
+### Features
+
+- 支持 HarmonyOS V3 收件箱样式与通知覆盖，及监控流 id 覆盖
+- 新增鸿蒙平台通知音时长参数及跨平台音轨适配
+- 全链路请求追踪与日志安全增强
+- add badge support for APNs and Harmony push
+- **harmony:** 实现鸿蒙通知撤回功能
+- **harmony:** 新增华为推送V3收件箱样式通知支持
+- **harmony:** add foregroundShow parameter for HarmonyOS V3 notifications
+- **harmony:** 新增通知大图标支持，优化图标参数处理
+
+### Maintenance
+
+- 将 .trae/ 目录加入 gitignore
+
+
 ## [v0.5.3](https://github.com/wallleap/timelynotify-server/compare/v0.5.2...v0.5.3)
 
 > 2026-09-01
 
 ### Documentation
 
+- update CHANGELOG for v0.5.3
 - update README with various changes and fixes
 
 ### Maintenance
