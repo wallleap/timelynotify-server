@@ -821,3 +821,383 @@ func TestPushMultiPlatformAllFail(t *testing.T) {
 		t.Fatalf("all-failed push should surface 500, got %d", res.StatusCode)
 	}
 }
+
+// overrideRevokeHarmony swaps the Harmony revoke seam for one test and
+// restores the original afterwards.
+func overrideRevokeHarmony(t *testing.T, fn func(tokens []string, notifyId int) (int, int, error)) {
+	t.Helper()
+	orig := revokeHarmony
+	revokeHarmony = fn
+	t.Cleanup(func() { revokeHarmony = orig })
+}
+
+// TestIsTruthyFlag covers the revoke flag parsing across the shapes the V1
+// (query/form strings) and V2 (JSON bool/number) entry points produce.
+func TestIsTruthyFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		in   interface{}
+		want bool
+	}{
+		{"bool true", true, true},
+		{"bool false", false, false},
+		{"string 1", "1", true},
+		{"string true", "true", true},
+		{"string TRUE upper", "TRUE", true},
+		{"string yes", "yes", true},
+		{"string on", "on", true},
+		{"empty string is flag presence (?revoke)", "", true},
+		{"whitespace padded", "  true ", true},
+		{"string 0", "0", false},
+		{"string false", "false", false},
+		{"string no", "no", false},
+		{"json number 1", float64(1), true},
+		{"json number 0", float64(0), false},
+		{"json number 7", float64(7), true},
+		{"int 5", 5, true},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTruthyFlag(tc.in); got != tc.want {
+				t.Errorf("isTruthyFlag(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHarmonyRevoke covers the HarmonyOS-only notification withdrawal:
+// a truthy `revoke` flag together with `id` (the original notifyId) must
+// call the revoke seam with the harmony token and the parsed notifyId,
+// must NEVER touch APNs, and all other push params are ignored.
+func TestHarmonyRevoke(t *testing.T) {
+	const harmonyTok = "harmony-revoke-token"
+	registerHarmonyUnderTestKey(t, harmonyTok)
+
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	var (
+		mu          sync.Mutex
+		gotTokens   []string
+		gotNotifyID int
+	)
+	var revokeCalls int32
+	overrideRevokeHarmony(t, func(tokens []string, notifyId int) (int, int, error) {
+		mu.Lock()
+		gotTokens = append([]string(nil), tokens...)
+		gotNotifyID = notifyId
+		mu.Unlock()
+		atomic.AddInt32(&revokeCalls, 1)
+		return 200, 80000000, nil
+	})
+
+	// V2 JSON: boolean flag + numeric id; title/body are irrelevant.
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":true,"id":12345,"title":"ignored","body":"ignored"}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("V2 revoke should succeed, got %d", res.StatusCode)
+	}
+	if got := atomic.LoadInt32(&revokeCalls); got != 1 {
+		t.Fatalf("revoke should be called once, got %d", got)
+	}
+	if gotNotifyID != 12345 {
+		t.Errorf("expected notifyId=12345, got %d", gotNotifyID)
+	}
+	if len(gotTokens) != 1 || gotTokens[0] != harmonyTok {
+		t.Errorf("expected harmony token %q, got %v", harmonyTok, gotTokens)
+	}
+	if apnsCalls != 0 {
+		t.Errorf("APNs must not be called for revoke, got %d calls", apnsCalls)
+	}
+
+	// V1 query form: revoke=1 with a string id.
+	res = doPush(t, "GET", "/"+key+"?revoke=1&id=678", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("V1 revoke should succeed, got %d", res.StatusCode)
+	}
+	if gotNotifyID != 678 {
+		t.Errorf("expected notifyId=678, got %d", gotNotifyID)
+	}
+
+	// Flag-style presence (?revoke) and "true" both count as enabled.
+	res = doPush(t, "GET", "/"+key+"?revoke=true&id=999", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("revoke=true should succeed, got %d", res.StatusCode)
+	}
+	if gotNotifyID != 999 {
+		t.Errorf("expected notifyId=999, got %d", gotNotifyID)
+	}
+
+	res = doPush(t, "GET", "/"+key+"?revoke&id=42", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("bare ?revoke flag should succeed, got %d", res.StatusCode)
+	}
+	if gotNotifyID != 42 {
+		t.Errorf("expected notifyId=42, got %d", gotNotifyID)
+	}
+
+	// JSON numeric flag form.
+	res = doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":1,"id":7}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("numeric revoke flag should succeed, got %d", res.StatusCode)
+	}
+	if gotNotifyID != 7 {
+		t.Errorf("expected notifyId=7, got %d", gotNotifyID)
+	}
+
+	// Large numeric id (int32 max, the HMS notifyId upper bound): JSON
+	// numbers decode as float64 and must NOT round-trip through
+	// fmt.Sprint (which yields "2.147483647e+09" — toInt would then
+	// silently parse 2). The revoke seam must see the exact integer.
+	res = doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":true,"id":2147483647}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("large numeric id revoke should succeed, got %d: %s", res.StatusCode, decodeBody(t, res))
+	}
+	if gotNotifyID != 2147483647 {
+		t.Errorf("expected notifyId=2147483647, got %d", gotNotifyID)
+	}
+}
+
+// TestHarmonyRevokeMissingID covers the 400 when revoke is requested
+// without a usable positive numeric id; the revoke seam must not be reached.
+func TestHarmonyRevokeMissingID(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-revoke-noid-token")
+
+	var revokeCalls int32
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		atomic.AddInt32(&revokeCalls, 1)
+		return 200, 0, nil
+	})
+
+	for _, body := range []string{
+		`{"device_key":"` + key + `","revoke":true}`,
+		`{"device_key":"` + key + `","revoke":true,"id":"abc"}`,
+		`{"device_key":"` + key + `","revoke":true,"id":-5}`,
+		`{"device_key":"` + key + `","revoke":true,"id":0}`,
+	} {
+		res := doPush(t, "POST", "/push", body, true)
+		if res.StatusCode != 400 {
+			t.Fatalf("body %s: expected 400, got %d", body, res.StatusCode)
+		}
+	}
+
+	// V1 form without id.
+	res := doPush(t, "GET", "/"+key+"?revoke=1", "", false)
+	if res.StatusCode != 400 {
+		t.Fatalf("revoke without id should be 400, got %d", res.StatusCode)
+	}
+	if got := atomic.LoadInt32(&revokeCalls); got != 0 {
+		t.Errorf("revoke seam must not be called without a valid id, got %d", got)
+	}
+}
+
+// TestHarmonyRevokeNoHarmonyDevice verifies revoke is HarmonyOS-only: a key
+// without any harmony record cannot revoke (APNs provides no remote
+// withdrawal API), and neither channel is called.
+func TestHarmonyRevokeNoHarmonyDevice(t *testing.T) {
+	// TestMain registers only the iOS record under the test key.
+	var revokeCalls int32
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		atomic.AddInt32(&revokeCalls, 1)
+		return 200, 0, nil
+	})
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":true,"id":1}`, true)
+	if res.StatusCode != 400 {
+		t.Fatalf("revoke without a harmony device should be 400, got %d", res.StatusCode)
+	}
+	if got := atomic.LoadInt32(&revokeCalls); got != 0 {
+		t.Errorf("revoke seam must not be called without a harmony token, got %d", got)
+	}
+	if apnsCalls != 0 {
+		t.Errorf("APNs must not be called for revoke, got %d", apnsCalls)
+	}
+}
+
+// TestHarmonyRevokeFailure surfaces a Huawei revoke failure as 500.
+func TestHarmonyRevokeFailure(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-revoke-fail-token")
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		return 500, 80000001, errors.New("huawei internal error")
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":true,"id":123}`, true)
+	if res.StatusCode != 500 {
+		t.Fatalf("revoke failure should surface 500, got %d", res.StatusCode)
+	}
+}
+
+// TestHarmonyRevokeInvalidTokenClears verifies that an 80200001 (invalid
+// token) response on revoke clears the stored harmony token, mirroring the
+// push path's dead-token cleanup.
+func TestHarmonyRevokeInvalidTokenClears(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-revoke-badtoken")
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		return 500, 80200001, errors.New("invalid token")
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":true,"id":123}`, true)
+	if res.StatusCode != 500 {
+		t.Fatalf("expected 500 for invalid token, got %d", res.StatusCode)
+	}
+
+	devices, err := db.DevicesByKey(key)
+	if err != nil {
+		t.Fatalf("db lookup: %v", err)
+	}
+	for _, di := range devices {
+		if di.Platform == "harmony" && di.Token != "" {
+			t.Fatalf("harmony token should be cleared after 80200001, got %q", di.Token)
+		}
+	}
+}
+
+// TestHarmonyRevokeFlagFalse verifies a falsey revoke value (false/0) does
+// NOT enter revoke mode — the request fans out as a normal push.
+func TestHarmonyRevokeFlagFalse(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-revoke-false-token")
+
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+	var revokeCalls, harmonyCalls int32
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		atomic.AddInt32(&revokeCalls, 1)
+		return 200, 0, nil
+	})
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string, int) (int, int, error) {
+		atomic.AddInt32(&harmonyCalls, 1)
+		return 200, 0, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","revoke":false,"body":"hi","id":123}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("normal push should succeed, got %d", res.StatusCode)
+	}
+	if atomic.LoadInt32(&revokeCalls) != 0 {
+		t.Errorf("revoke must not be called when flag is false, got %d", revokeCalls)
+	}
+	if atomic.LoadInt32(&harmonyCalls) != 1 || apnsCalls != 1 {
+		t.Errorf("falsey revoke should fan out as a normal push, got harmony=%d apns=%d", harmonyCalls, apnsCalls)
+	}
+}
+
+// TestToInt locks down strict integer parsing. In particular a
+// scientific-notation string ("2.147483647e+09", produced by
+// fmt.Sprint on a large float64 JSON number) must be rejected — the
+// previous fmt.Sscanf("%d") implementation silently parsed the leading
+// "2" and returned no error.
+func TestToInt(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    int
+		wantErr bool
+	}{
+		{"123", 123, false},
+		{"0", 0, false},
+		{"2147483647", 2147483647, false},
+		{" 42 ", 42, false},
+		{"-5", -5, false},
+		{"", 0, true},
+		{"abc", 0, true},
+		{"2.147483647e+09", 0, true},
+		{"12.5", 0, true},
+		{"12abc", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := toInt(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("toInt(%q) = %d, want error", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("toInt(%q) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("toInt(%q) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNumberToString covers the JSON-number-to-string normalization used
+// for id/badge/soundDuration. A large float64 (JSON numbers decode as
+// float64) must render as a plain integer string, never in scientific
+// notation (fmt.Sprint would produce "2.147483647e+09").
+func TestNumberToString(t *testing.T) {
+	cases := []struct {
+		name string
+		in   interface{}
+		want string
+	}{
+		{"float64 int32 max", float64(2147483647), "2147483647"},
+		{"float64 small", float64(12345), "12345"},
+		{"float64 zero", float64(0), "0"},
+		{"int", 7, "7"},
+		{"int64", int64(9999999999), "9999999999"},
+		{"string passthrough", "42", "42"},
+		{"json.Number", json.Number("2147483647"), "2147483647"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := numberToString(tc.in); got != tc.want {
+				t.Errorf("numberToString(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPushLargeNumericID verifies the SEND path with a large JSON numeric
+// id: the HarmonyOS seam must receive notifyId=2147483647 (not 2 from a
+// scientific-notation truncation) and the APNs collapse id must be the
+// plain string "2147483647".
+func TestPushLargeNumericID(t *testing.T) {
+	registerHarmonyUnderTestKey(t, "harmony-largeid-token")
+
+	var (
+		mu            sync.Mutex
+		gotNotifyID   int
+		gotApnsID     string
+		harmonyCalls  int32
+	)
+	overridePushHarmony(t, func(_ []string, _, _, _, _ string, _ int, _ *int, _ string, _, _ int, _ []string, notifyId int) (int, int, error) {
+		mu.Lock()
+		gotNotifyID = notifyId
+		harmonyCalls++
+		mu.Unlock()
+		return 200, 80000000, nil
+	})
+	overridePushAPNs(t, func(msg *apns.PushMessage) (int, error) {
+		mu.Lock()
+		gotApnsID = msg.Id
+		mu.Unlock()
+		return 200, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","id":2147483647,"body":"large id"}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("push with large numeric id should succeed, got %d: %s", res.StatusCode, decodeBody(t, res))
+	}
+	if atomic.LoadInt32(&harmonyCalls) != 1 {
+		t.Fatalf("harmony push should be called once, got %d", harmonyCalls)
+	}
+	if gotNotifyID != 2147483647 {
+		t.Errorf("expected notifyId=2147483647, got %d", gotNotifyID)
+	}
+	if gotApnsID != "2147483647" {
+		t.Errorf("expected APNs id %q, got %q", "2147483647", gotApnsID)
+	}
+}

@@ -65,6 +65,23 @@ var (
 	// Example: "461323198428915726"
 	projectID = "461323198428915726"
 
+	// clientID: The APP-level Client ID required by the v1 message-revoke
+	// endpoint. AGC has TWO Client IDs at different levels (项目设置 → 常规):
+	//   项目级 Client ID: the client.client_id field in
+	//     agconnect-services.json — NOT accepted by the revoke API
+	//     (fails with HMS 80300002 "No permission to send message to
+	//     these tmIDs").
+	//   应用级 Client ID (this one): shown as "OAuth 2.0客户端ID(凭据)-
+	//     Client ID" under 应用信息; its value equals the APP ID.
+	//
+	// Used only by the v1 message-revoke endpoint (消息撤回):
+	//   https://push-api.cloud.huawei.com/v1/<clientID>/messages:revoke
+	// Message sending (v3) uses projectID; message revoke (v1) uses clientID.
+	// Leave empty to keep sending working; revoke requests then fail fast
+	// with a clear configuration error.
+	// Example: "6917614352726343880"
+	clientID = "6917614352726343880"
+
 	// privateKey: The private_key field from the credentials JSON.
 	// This is an RSA private key in PKCS#8 PEM format.
 	//

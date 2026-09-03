@@ -271,7 +271,8 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
 | 字段           | 类型       | iOS                                                          | HarmonyOS                                                    |
 | -------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| id             | string     | 使用相同的ID值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2, bark-server v2.2.5 以上，Json传参需使用字符串类型<br/>传 `id` 时监控流（`/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识） |
+| id             | string     | 使用相同的ID值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2, bark-server v2.2.5 以上，Json传参需使用字符串类型<br/>传 `id` 时监控流（`/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `revoke` 撤回模式的目标 notifyId（见 [通知撤回](#通知撤回仅鸿蒙)） |
+| revoke         | bool/string | -                                                           | 真值（JSON `true`/非零数字，query 的 `1`/`true`/`yes`/`on` 或裸 `?revoke`）进入**撤回模式**：用 `id`（原通知 notifyId，须正整数）撤回该 key 下鸿蒙设备上尚未点击/未下发的通知，调用华为 v1 `messages:revoke`；忽略其它所有推送参数、不写监控流；仅鸿蒙生效（iOS 无远程撤回 API），无鸿蒙记录返回 400；需在 `harmony/harmony_certs.go` 配置应用级 `clientID`，详见 [通知撤回](#通知撤回仅鸿蒙) |
 | level          | string     | APNs 优先级：`critical`/`active`/`timeSensitive`/`passive`   | -                                                            |
 | volume         | string     | critical 通知铃声音量                                        | -                                                            |
 | badge          | integer    | App 图标角标数，值为 `0` 时清除角标                          | 同 iOS                                                       |
@@ -306,6 +307,29 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 - 推送历史只记录一次（gotify 监控流），与平台数无关。
 
 **收窄到指定平台**：在推送体里带 `"platform": "ios"` 或 `"platform": "harmony"`，仅推该平台记录。`platform` 是**收窄**而非覆盖——只选择投递哪些已绑定记录，不会改写存储的平台字段。
+
+### 通知撤回（仅鸿蒙）
+
+推送请求带真值 `revoke` 参数时，**不发送新通知**，而是撤回之前用相同 `id`（华为 notifyId）发出、**尚未下发到端侧或已展示但未点击**的通知（华为 v1 `messages:revoke` 接口）：
+
+```sh
+# V2 JSON
+curl -X POST http://127.0.0.1:18080/push -H 'Content-Type: application/json' \
+  -d '{"device_key":"<your key>","revoke":true,"id":12345}'
+
+# V1 兼容路径（裸 ?revoke、revoke=1、revoke=true 均视为真）
+curl "http://127.0.0.1:18080/<your key>?revoke=1&id=12345"
+```
+
+约定：
+
+- **`id` 必填且必须是正整数**——即原推送携带的 `id`（V3 notifyId）；原推送未带 `id` 则无法撤回。缺失、非数字或非正数返回 400；
+- **仅鸿蒙设备生效**（APNs 无远程通知撤回 API）；该 key 下无鸿蒙记录、或 `platform=ios` 收窄后无鸿蒙目标时返回 400；
+- 真值时**忽略其它所有推送参数**（title/body/sound/…），且**不写 gotify 监控流**（没有消息投递）；
+- 撤回端点为华为 v1 `messages:revoke`，URL 中的应用级 **Client ID** 与发送端点（v3 `projectId`）不同，需在 `harmony/harmony_certs.go` 的 `clientID` 配置：取 AGC「项目设置 → 常规 → 应用信息 → **OAuth 2.0客户端ID(凭据)-Client ID**」（值等于 APP ID）。**注意不要填成项目级 Client ID**（即 `agconnect-services.json` 顶层 `client.client_id`，两种 ID 同页并存）——填成项目级会报 `80300002 No permission to send message to these tmIDs`；未配置时撤回请求快速报错，正常推送不受影响；
+- 撤回请求体为扁平结构 `{"notifyId": <id>, "token": [...]}`，`push-type: 0`；失败时 80200001/80300007 视为失效 token，按平台定向清理鸿蒙记录；
+- 批量推送与 MCP 接口同样支持 `revoke` 参数（走同一条 `push()` 链路）；
+- **端侧生效条件**：华为返回 `80000000` 只代表 Push 服务端**受理**撤回请求，通知是否真正从通知栏移除取决于设备能力——支持 **Phone/Tablet/PC（HarmonyOS NEXT 5.1 及以上）**、Wearable（5.1.0(18)+）、TV（5.1.1(19)+）的**真机**；**DevEco 模拟器（emulator）不处理已展示通知的撤回指令**（API 照样返回成功，但通知保留；未下发/未展示的消息在模拟器上可拦下）。因此模拟器上「撤回成功但通知还在」是平台限制，不是服务端问题，验证已展示消息撤回请用真机；最可靠的用法是发错后**尽快撤回**（趁消息未展示）。
 
 ### 参数优先级
 

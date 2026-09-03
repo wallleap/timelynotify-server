@@ -9,6 +9,7 @@
 | 功能 | 说明 | 文档 |
 | ----- | ----------- | ---- |
 | 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；`level` 字段映射到华为 `click_action` | [API_V2.md](docs/API_V2.md) |
+| 鸿蒙通知撤回（revoke） | 推送请求带真值 `revoke` + `id`（原 notifyId，正整数）时，调用华为 v1 `messages:revoke` 撤回该 key 下鸿蒙设备上未点击/未下发的通知；仅鸿蒙生效（iOS 无远程撤回），忽略其它推送参数、不写监控流；撤回端点用应用级 `clientID`（与发送的 v3 `projectId` 不同，在 `harmony/harmony_certs.go` 配置，留空不影响发送）；V1/V2/批量/MCP 全入口支持 | [API.md](docs/API.md) |
 | 多平台 fan-out（同一 device_key 多端并存） | 数据库按 `(key, platform)` 唯一约束，**同一 `device_key` 可同时绑定 iOS 与鸿蒙记录**；推送时默认扇出到该 key 下所有有效平台（任一成功即 200，全部失败才 500），推送请求体的 `platform` 字段语义从"覆盖存储平台"改为"**收窄**到指定平台"；失效 token 清理改为按平台定向 `ClearDeviceTokenByKeyAndPlatform`，修复跨平台误清 bug | [TOKENS.md](docs/TOKENS.md) |
 | Gotify 兼容监控及其它消息相关接口 | 设备级 `GET /<device_key>/version`、`GET /<device_key>/message`、`GET /<device_key>/stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | 消息查找与导出 | 设备级 `GET /<device_key>/message` 支持 `?query=<关键词>`（title+body 不区分大小写子串匹配，响应含 `paging.total` 命中总数）与 `?limit=-1`（**分块流式导出**该设备全部现存消息，内存占用与总量无关） | [API.md](docs/API.md) |

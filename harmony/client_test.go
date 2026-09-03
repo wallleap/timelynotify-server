@@ -1145,6 +1145,248 @@ func TestClient_Send_NotifyIdOmitted(t *testing.T) {
 	}
 }
 
+// TestClient_Revoke_EmptyTokens verifies that revoke fails fast when no
+// target tokens are provided, before any HTTP call is made.
+func TestClient_Revoke_EmptyTokens(t *testing.T) {
+	ts, _ := NewTokenSource()
+	client := NewClient(ts)
+	status, hmsCode, err := client.Revoke(nil, 123)
+	if err == nil {
+		t.Fatal("expected error for empty tokens")
+	}
+	if status != 0 || hmsCode != 0 {
+		t.Errorf("expected zero codes, got status=%d hmsCode=%d", status, hmsCode)
+	}
+}
+
+// TestClient_Revoke_InvalidNotifyId verifies that notifyId is required and
+// positive: Huawei withdraws by the notifyId carried by the original push,
+// so zero/negative ids cannot identify anything.
+func TestClient_Revoke_InvalidNotifyId(t *testing.T) {
+	ts, _ := NewTokenSource()
+	// Unreachable URL; validation must fail before HTTP anyway.
+	client := NewClientWithURL(ts, "http://localhost:19999")
+	for _, id := range []int{0, -1, -100} {
+		status, hmsCode, err := client.Revoke([]string{"t1"}, id)
+		if err == nil {
+			t.Fatalf("notifyId=%d: expected error", id)
+		}
+		if status != 0 || hmsCode != 0 {
+			t.Errorf("notifyId=%d: expected zero codes, got status=%d hmsCode=%d", id, status, hmsCode)
+		}
+	}
+}
+
+// TestClient_Revoke_JSONPayload verifies the revoke request shape per the
+// official "消息撤回" docs:
+//
+//	URL:  https://push-api.cloud.huawei.com/v1/<clientId>/messages:revoke
+//	      (v1 with the app Client ID — NOT the v3 projectId used by Send)
+//	Body: {"notifyId":3114932,"token":["pushToken1",...]}  (flat envelope)
+//	Hdr:  push-type: 0 (Alert/notification), Authorization: Bearer <jwt>
+func TestClient_Revoke_JSONPayload(t *testing.T) {
+	var capturedBody []byte
+	var capturedAuth, capturedPushType, capturedPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		capturedPushType = r.Header.Get(pushTypeHeader)
+		capturedPath = r.URL.Path
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		capturedBody = buf
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClient(ts)
+	clientID = "test-client-id"
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	if _, _, err := client.Revoke([]string{"token1", "token2"}, 3114932); err != nil {
+		t.Fatalf("Revoke failed: %v", err)
+	}
+
+	wantPath := "/v1/test-client-id/messages:revoke"
+	if capturedPath != wantPath {
+		t.Errorf("expected path %q (v1 clientId revoke endpoint), got %q", wantPath, capturedPath)
+	}
+	if !strings.HasPrefix(capturedAuth, "Bearer ") {
+		t.Errorf("expected Authorization header to start with 'Bearer ', got %q", capturedAuth)
+	}
+	if capturedPushType != pushTypeAlert {
+		t.Errorf("expected push-type header %q, got %q", pushTypeAlert, capturedPushType)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("failed to unmarshal revoke body: %v", err)
+	}
+	if got, ok := payload["notifyId"].(float64); !ok || int(got) != 3114932 {
+		t.Errorf("expected notifyId=3114932, got %v", payload["notifyId"])
+	}
+	tokens, ok := payload["token"].([]interface{})
+	if !ok || len(tokens) != 2 || tokens[0] != "token1" || tokens[1] != "token2" {
+		t.Errorf("expected token=[token1 token2], got %v", payload["token"])
+	}
+	// The flat revoke body must NOT carry the v3 send envelope keys.
+	if _, ok := payload["payload"]; ok {
+		t.Errorf("revoke body must be flat, found v3 'payload' key: %v", payload)
+	}
+	if _, ok := payload["target"]; ok {
+		t.Errorf("revoke body must be flat, found v3 'target' key: %v", payload)
+	}
+	if _, ok := payload["pushOptions"]; ok {
+		t.Errorf("revoke body must be flat, found v3 'pushOptions' key: %v", payload)
+	}
+}
+
+// TestClient_Revoke_ClientIDNotConfigured verifies that revoke fails fast
+// with a clear error when the app Client ID (required for the v1 URL path)
+// has not been configured in harmony_certs.go.
+func TestClient_Revoke_ClientIDNotConfigured(t *testing.T) {
+	orig := clientID
+	clientID = ""
+	t.Cleanup(func() { clientID = orig })
+
+	ts, _ := NewTokenSource()
+	client := NewClient(ts) // production URL (baseURL empty), no mock
+	status, _, err := client.Revoke([]string{"t1"}, 123)
+	if err == nil {
+		t.Fatal("expected error when clientID is not configured")
+	}
+	if status != 0 {
+		t.Errorf("expected zero status before any HTTP call, got %d", status)
+	}
+	if !strings.Contains(err.Error(), "client ID") {
+		t.Errorf("expected error to mention client ID, got %v", err)
+	}
+}
+
+// TestClient_Revoke_StringCodeSuccess verifies that a string-coded success
+// (the real API shape: {"code":"80000000","msg":"Success"}) is treated as
+// success and hmsCode surfaces 80000000 — same envelope handling as Send.
+func TestClient_Revoke_StringCodeSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":"80000000","msg":"Success","requestId":"rev-req-1"}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	status, hmsCode, err := client.Revoke([]string{"t1"}, 777)
+	if err != nil {
+		t.Fatalf("Revoke should succeed with code 80000000, got error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+	if hmsCode != 80000000 {
+		t.Errorf("expected hmsCode 80000000 (real Huawei code), got %d", hmsCode)
+	}
+}
+
+// TestClient_Revoke_InvalidToken verifies that the "all tokens invalid"
+// business code 80200001 surfaces as an error and does NOT trigger a retry.
+func TestClient_Revoke_InvalidToken(t *testing.T) {
+	var callCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":"80200001","msg":"invalid token"}`))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	_, hmsCode, err := client.Revoke([]string{"bad-token"}, 1)
+	if err == nil {
+		t.Fatal("expected error for invalid token, got nil")
+	}
+	if hmsCode != 80200001 {
+		t.Errorf("expected hmsCode 80200001, got %d", hmsCode)
+	}
+	if count := atomic.LoadInt32(&callCount); count != 1 {
+		t.Errorf("expected only 1 call (no retry), got %d", count)
+	}
+}
+
+// TestClient_Revoke_RetryOnTokenExpired verifies the 80200003 expired-token
+// retry path works for revoke just like Send: invalidate the cached JWT and
+// retry exactly once.
+func TestClient_Revoke_RetryOnTokenExpired(t *testing.T) {
+	var callCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if n == 1 {
+			w.Write([]byte(`{"code":"80200003","msg":"access token expired"}`))
+		} else {
+			w.Write([]byte(`{"code":"80000000","msg":"Success"}`))
+		}
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	status, _, err := client.Revoke([]string{"t1"}, 5)
+	if err != nil {
+		t.Fatalf("Revoke should succeed after retry, got error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected status 200, got %d", status)
+	}
+	if count := atomic.LoadInt32(&callCount); count != 2 {
+		t.Errorf("expected 2 calls due to retry, got %d", count)
+	}
+}
+
+// TestClient_Revoke_HttpError verifies that a non-200 HTTP response is
+// surfaced as an error (shared envelope handling with Send).
+func TestClient_Revoke_HttpError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Bad Request"))
+	}))
+	defer server.Close()
+
+	ts, _ := NewTokenSource()
+	client := NewClientWithURL(ts, server.URL)
+	client.httpCli = &http.Client{
+		Transport: &rewriteTransport{target: server.URL},
+	}
+
+	status, _, err := client.Revoke([]string{"t1"}, 1)
+	if err == nil {
+		t.Fatal("expected error for HTTP 400, got nil")
+	}
+	if status != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", status)
+	}
+}
+
 // TestClient_Send_NotifyIdWithInbox verifies that notifyId and inboxContent
 // coexist in the same notification — a non-zero notifyId does not interfere
 // with the inbox style=3 pairing.

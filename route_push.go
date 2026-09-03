@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -75,6 +77,15 @@ var pushHarmony = func(targetTokens []string, title, body, data, icon string, ac
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
 	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow, inboxContent, notifyId)
+}
+
+// revokeHarmony is the seam used by pushRevoke() to withdraw a HarmonyOS
+// notification. Tests override it to run the pipeline offline.
+var revokeHarmony = func(targetTokens []string, notifyId int) (int, int, error) {
+	if harmonyClient == nil {
+		return 0, 0, fmt.Errorf("harmony client not initialized")
+	}
+	return harmonyClient.Revoke(targetTokens, notifyId)
 }
 
 func init() {
@@ -306,13 +317,78 @@ func extractUrlPathParams(c *fiber.Ctx) (map[string]interface{}, error) {
 	return params, nil
 }
 
-// toInt coerces a string to int; used for numeric query params and
-// JSON numbers (fmt.Sprint'd to string first) that represent count values
-// like badge count.
+// toInt coerces a string to int with STRICT integer parsing. Used for
+// numeric query params and normalized JSON numbers (see numberToString).
+// strconv.Atoi rejects partial/non-integer input ("2.147e+09", "12abc")
+// outright — the previous fmt.Sscanf("%d") implementation silently
+// consumed the leading digits of a scientific-notation string and
+// returned no error (e.g. "2.147483647e+09" parsed as 2).
 func toInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, fmt.Errorf("parse int %q: %w", s, err)
+	}
+	return n, nil
+}
+
+// numberToString renders a request parameter value as a plain, integer
+// string. JSON numbers decode as float64, and fmt.Sprint renders large
+// ones in scientific notation (float64(2147483647) →
+// "2.147483647e+09"), which then breaks id/notifyId/badge parsing.
+// Integral float64 values render via int64 (no exponent); non-integral
+// values use fixed-point notation; strings and json.Number pass through.
+// All integer ids in this codebase stay well within float64 exactness
+// (HMS notifyId max is 2^31-1 ≪ 2^53).
+func numberToString(v interface{}) string {
+	switch n := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return n
+	case json.Number:
+		return n.String()
+	case float64:
+		if n == float64(int64(n)) {
+			return strconv.FormatInt(int64(n), 10)
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// isTruthyFlag parses a boolean-ish request parameter across the shapes
+// the V1 (query/form strings) and V2 (JSON bool/number) entry points
+// produce: bools pass through; numbers are truthy when non-zero; strings
+// accept "1"/"true"/"yes"/"on" (case-insensitive, whitespace trimmed); an
+// empty string means bare flag presence (?revoke) and is truthy; anything
+// else (e.g. "0"/"false"/"no") is false.
+func isTruthyFlag(v interface{}) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case nil:
+		return false
+	case string:
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "":
+			return true
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		// JSON numbers (float64/int) arrive here; non-zero is truthy.
+		if n, err := toInt(numberToString(v)); err == nil {
+			return n != 0
+		}
+		return true
+	}
 }
 
 // toInboxStrings coerces a V2 JSON array ([]interface{}), a V1 JSON-encoded
@@ -429,6 +505,15 @@ func push(rid string, params map[string]interface{}) (int, error) {
 				}
 			case "platform":
 				msg.ExtParams["_platform"] = val
+			case "revoke":
+				// HarmonyOS-only notification withdrawal. A truthy flag
+				// plus `id` (the original notifyId) short-circuits the push
+				// pipeline into pushRevoke(); every other push parameter
+				// (title/body/sound/...) is ignored. V2 JSON bool/number
+				// forms bypass the string case and are normalized below.
+				if isTruthyFlag(val) {
+					msg.ExtParams["_revoke"] = true
+				}
 			case "icon":
 				// Users often copy example URLs wrapped in backticks/whitespace
 				// from docs; APNs image loading and Huawei image download both
@@ -451,7 +536,7 @@ func push(rid string, params map[string]interface{}) (int, error) {
 	// value is accepted (including zero and negatives), HasBadge distinguishes
 	// "not set" from an explicit zero.
 	if v, ok := msg.ExtParams["badge"]; ok && !msg.HasBadge {
-		if n, err := toInt(fmt.Sprint(v)); err == nil {
+		if n, err := toInt(numberToString(v)); err == nil {
 			msg.Badge = n
 			msg.HasBadge = true
 		}
@@ -462,8 +547,10 @@ func push(rid string, params map[string]interface{}) (int, error) {
 	// HarmonyOS notifyId parsing (toInt(msg.Id)) and APNs collapse-id both
 	// work; also normalize the ExtParams value to string for consistent
 	// downstream matching (gotify overwrite uses fmt.Sprint on extras["id"]).
+	// numberToString (NOT fmt.Sprint) keeps large integers intact instead
+	// of rendering them in scientific notation.
 	if v, ok := msg.ExtParams["id"]; ok {
-		s := fmt.Sprint(v)
+		s := numberToString(v)
 		if msg.Id == "" {
 			msg.Id = s
 		}
@@ -478,7 +565,7 @@ func push(rid string, params map[string]interface{}) (int, error) {
 	for _, k := range []string{"soundDuration", "soundduration"} {
 		if v, ok := msg.ExtParams[k]; ok {
 			delete(msg.ExtParams, k)
-			if n, err := toInt(fmt.Sprint(v)); err == nil {
+			if n, err := toInt(numberToString(v)); err == nil {
 				msg.ExtParams["soundduration"] = n
 			}
 		}
@@ -491,7 +578,7 @@ func push(rid string, params map[string]interface{}) (int, error) {
 	for _, k := range []string{"foregroundShow", "foregroundshow"} {
 		if v, ok := msg.ExtParams[k]; ok {
 			delete(msg.ExtParams, k)
-			if n, err := toInt(fmt.Sprint(v)); err == nil {
+			if n, err := toInt(numberToString(v)); err == nil {
 				msg.ExtParams["foregroundShow"] = n
 			} else {
 				msg.ExtParams["foregroundShow"] = 0
@@ -512,9 +599,34 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			}
 		}
 	}
+	// Revoke flag normalization: V1 query/form values land under the
+	// lowercase "revoke" key (handled in the string switch above); V2 JSON
+	// keeps the original casing and may use a bool, number or string.
+	// Collapse any casing into the internal "_revoke" marker (truthy only,
+	// so a falsey flag never leaves a stray key in the APNs payload) and
+	// drop the raw key so it is never forwarded as a custom payload field.
+	for k, v := range msg.ExtParams {
+		if strings.ToLower(k) != "revoke" {
+			continue
+		}
+		delete(msg.ExtParams, k)
+		if isTruthyFlag(v) {
+			msg.ExtParams["_revoke"] = true
+		}
+	}
 	if msg.DeviceKey == "" {
 		logger.Errorf("[Push] rid=%s device key is empty", rid)
 		return 400, fmt.Errorf("device key is empty")
+	}
+
+	// HarmonyOS notification withdrawal: a truthy `revoke` flag reroutes
+	// the whole request into pushRevoke() (v1 messages:revoke). Only
+	// device_key + id (notifyId) are meaningful there; every other push
+	// parameter is ignored by design. Revoke is HarmonyOS-only — APNs has
+	// no remote notification withdrawal API — and does not publish to the
+	// monitoring stream since nothing is delivered.
+	if _, revoke := msg.ExtParams["_revoke"]; revoke {
+		return pushRevoke(rid, &msg)
 	}
 
 	if msg.IsEmptyAlert() {
@@ -686,7 +798,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	}
 	var soundDuration int
 	if v, ok := msg.ExtParams["soundduration"]; ok {
-		soundDuration, _ = toInt(fmt.Sprint(v))
+		soundDuration, _ = toInt(numberToString(v))
 	}
 
 	// Bark `foregroundShow` controls the V3 notification.foregroundShow
@@ -695,7 +807,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	// push() normalization block stores an int under the canonical key.
 	foregroundShow := 1
 	if v, ok := msg.ExtParams["foregroundShow"]; ok {
-		if n, err := toInt(fmt.Sprint(v)); err == nil {
+		if n, err := toInt(numberToString(v)); err == nil {
 			foregroundShow = n
 		} else {
 			foregroundShow = 0
@@ -757,5 +869,80 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 
 	logger.Infof("[Push] rid=%s HarmonyOS success: device_key=%s token=%s hmsCode=%d",
 		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), hmsCode)
+	return 200, nil
+}
+
+// pushRevoke withdraws a previously delivered HarmonyOS notification.
+//
+// Reached from push() when the request carries a truthy `revoke` flag;
+// the Bark `id` param is used as notifyId and must have been sent with
+// the original push (an auto-generated id cannot be referenced later).
+// Revoke is HarmonyOS-only — APNs provides no remote notification
+// withdrawal API — so only harmony records under the device_key are
+// targeted (an explicit platform=ios narrows to none → 400). Every
+// other push parameter (title/body/sound/...) is ignored, and no
+// monitoring-stream entry is published since nothing is delivered.
+func pushRevoke(rid string, msg *apns.PushMessage) (int, error) {
+	maskedKey := logging.MaskMiddle(msg.DeviceKey)
+
+	devices, err := db.DevicesByKey(msg.DeviceKey)
+	if err != nil {
+		if _, probe := wellKnownProbeKeys[msg.DeviceKey]; probe {
+			logger.Infof("[Push] rid=%s revoke probe path rejected: device_key=%s", rid, maskedKey)
+			return 404, fmt.Errorf("device not found")
+		}
+		logger.Errorf("[Push] rid=%s revoke device not found: device_key=%s err=%v", rid, maskedKey, err)
+		return 400, fmt.Errorf("failed to get device info: %v", err)
+	}
+
+	// Revoke only targets harmony tokens; APNs has no remote withdrawal.
+	// platform=ios explicitly narrows to nothing → 400 below.
+	explicitPlatform, _ := msg.ExtParams["_platform"].(string)
+	tokens := make([]string, 0, len(devices))
+	for _, di := range devices {
+		if di.Platform != "harmony" || di.Token == "" {
+			continue
+		}
+		if explicitPlatform != "" && di.Platform != explicitPlatform {
+			continue
+		}
+		tokens = append(tokens, di.Token)
+	}
+	if len(tokens) == 0 {
+		logger.Warnf("[Push] rid=%s revoke no harmony target: device_key=%s explicit=%s", rid, maskedKey, explicitPlatform)
+		return 400, fmt.Errorf("no valid harmony device token for key %s", msg.DeviceKey)
+	}
+
+	// notifyId is required and must be the positive numeric id carried by
+	// the original push (Bark `id` → V3 notification.notifyId).
+	notifyId, err := toInt(msg.Id)
+	if err != nil || notifyId <= 0 {
+		logger.Warnf("[Push] rid=%s revoke requires a numeric positive id: device_key=%s id=%q", rid, maskedKey, msg.Id)
+		return 400, fmt.Errorf("revoke requires a numeric positive id")
+	}
+
+	initHarmony()
+	if harmonyClient == nil {
+		logger.Errorf("[Push] rid=%s HarmonyOS client not initialized for revoke: device_key=%s", rid, maskedKey)
+		return 500, fmt.Errorf("harmony push client is not initialized")
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS revoke: device_key=%s notifyId=%d targets=%d",
+		rid, maskedKey, notifyId, len(tokens))
+
+	_, hmsCode, err := revokeHarmony(tokens, notifyId)
+	if err != nil {
+		if hmsCode == 80200001 {
+			logger.Warnf("[Push] rid=%s HarmonyOS revoke invalid token, clearing: device_key=%s platform=harmony targets=%d hmsCode=%d",
+				rid, maskedKey, len(tokens), hmsCode)
+			_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, "harmony")
+		}
+		logger.Errorf("[Push] rid=%s HarmonyOS revoke failed: device_key=%s notifyId=%d hmsCode=%d err=%v",
+			rid, maskedKey, notifyId, hmsCode, err)
+		return 500, fmt.Errorf("harmony revoke failed (code %d): %v", hmsCode, err)
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS revoke success: device_key=%s notifyId=%d hmsCode=%d targets=%d",
+		rid, maskedKey, notifyId, hmsCode, len(tokens))
 	return 200, nil
 }

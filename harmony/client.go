@@ -3,6 +3,7 @@ package harmony
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,18 @@ import (
 // the legacy form and is not recommended. This project targets HarmonyOS
 // NEXT, so v3 is required.
 const sendAPIURL = "https://push-api.cloud.huawei.com/v3/%s/messages:send"
+
+// revokeAPIURL is the Huawei Push Kit message revocation endpoint (消息撤回).
+// Unlike sendAPIURL it uses the v1 URL with the app-level Client ID (NOT the
+// v3 project ID — the two ids belong to the same AGC project but differ):
+//
+//	https://push-api.cloud.huawei.com/v1/[clientId]/messages:revoke
+//
+// Auth is the same service-account JWT and the request still carries the
+// "push-type: 0" (Alert) header; the body is a flat {notifyId, token[]}
+// envelope (see revokeMessage). Revoke only reaches messages not yet
+// delivered to the device or displayed but not yet clicked.
+const revokeAPIURL = "https://push-api.cloud.huawei.com/v1/%s/messages:revoke"
 
 // pushTypeHeader is the HTTP header name for the scenario message type.
 // Per the V3 docs, the request MUST carry a "push-type" header; 0 = Alert
@@ -124,6 +137,19 @@ type ClickAction struct {
 	Action     string                 `json:"action,omitempty"`
 	URI        string                 `json:"uri,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty"`
+}
+
+// revokeMessage is the v1 messages:revoke request body. Per Huawei's
+// "消息撤回" docs the envelope is flat — unlike the nested v3 send shape:
+//
+//	{ "notifyId": 3114932, "token": ["pushToken1", "pushToken2"] }
+//
+// notifyId MUST equal the notifyId carried when the notification was
+// originally sent (the Bark `id` param mapped to notification.notifyId);
+// up to 1000 target tokens are allowed per call.
+type revokeMessage struct {
+	NotifyID int      `json:"notifyId"`
+	Token    []string `json:"token"`
 }
 
 // Client is a minimal wrapper around the Huawei Push Kit HTTP API.
@@ -251,6 +277,32 @@ func (c *Client) Send(targetTokens []string, title, body, data, icon string, act
 	return c.sendWithRetry(msg)
 }
 
+// Revoke withdraws a previously delivered Alert (notification) message
+// identified by notifyId from the given target tokens, via the v1
+// messages:revoke endpoint. notifyId must be the same positive integer id
+// carried by the original push (the Bark `id` param mapped to
+// notification.notifyId); per Huawei's constraints only messages not yet
+// delivered to the device, or displayed but not yet clicked, can be
+// withdrawn — a push sent without an explicit notifyId cannot be revoked.
+//
+// Returns the Huawei HTTP status, business code and wrapped error. On the
+// access-token-expired code (80200003) it invalidates the cached JWT and
+// retries exactly once, mirroring Send.
+func (c *Client) Revoke(targetTokens []string, notifyId int) (httpStatus int, hmsCode int, err error) {
+	if len(targetTokens) == 0 {
+		return 0, 0, fmt.Errorf("no target tokens provided")
+	}
+	if notifyId <= 0 {
+		return 0, 0, fmt.Errorf("notifyId is required and must be positive for revoke")
+	}
+
+	msg := &revokeMessage{
+		NotifyID: notifyId,
+		Token:    targetTokens,
+	}
+	return c.withRetry(func() (int, int, error) { return c.doRevoke(msg) })
+}
+
 // parseDataField tries to parse data as a JSON object; on failure it wraps
 // the raw string under a "data" key so custom data is never lost.
 func parseDataField(data string) map[string]interface{} {
@@ -300,12 +352,13 @@ func clampSoundDuration(seconds int) int {
 	return seconds
 }
 
-// sendWithRetry performs the actual HTTP call. It retries once on the
-// specific "access token expired" (80200003) error, which is the most
-// common transient failure.
-func (c *Client) sendWithRetry(msg *Message) (httpStatus int, hmsCode int, err error) {
+// withRetry runs fn once and retries exactly once when the first attempt
+// fails with the "access token expired" business code (80200003), after
+// invalidating the cached JWT. Both send (v3) and revoke (v1) share this
+// recovery path.
+func (c *Client) withRetry(fn func() (int, int, error)) (httpStatus int, hmsCode int, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		httpStatus, hmsCode, err = c.doSend(msg)
+		httpStatus, hmsCode, err = fn()
 		if err != nil {
 			// If the error indicates an expired token, invalidate and retry.
 			if hmsCode == 80200003 && attempt == 0 {
@@ -319,23 +372,64 @@ func (c *Client) sendWithRetry(msg *Message) (httpStatus int, hmsCode int, err e
 	return httpStatus, hmsCode, err
 }
 
-// doSend marshals the message and performs a single HTTP POST.
+// sendWithRetry performs the v3 send call with one expired-token retry.
+func (c *Client) sendWithRetry(msg *Message) (httpStatus int, hmsCode int, err error) {
+	return c.withRetry(func() (int, int, error) { return c.doSend(msg) })
+}
+
+// doSend marshals the v3 send message and performs a single HTTP POST.
 func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return 0, 0, fmt.Errorf("marshal message: %w", err)
 	}
+	return c.postOnce(c.sendURL(), payload)
+}
 
+// doRevoke marshals the v1 revoke request and performs a single HTTP POST.
+func (c *Client) doRevoke(msg *revokeMessage) (httpStatus int, hmsCode int, err error) {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return 0, 0, fmt.Errorf("marshal revoke message: %w", err)
+	}
+	apiURL, err := c.revokeURL()
+	if err != nil {
+		return 0, 0, err
+	}
+	return c.postOnce(apiURL, payload)
+}
+
+// sendURL returns the v3 messages:send endpoint, honoring the mock baseURL.
+func (c *Client) sendURL() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+	return fmt.Sprintf(sendAPIURL, projectID)
+}
+
+// revokeURL returns the v1 messages:revoke endpoint, honoring the mock
+// baseURL. The production URL requires the app-level clientID (distinct
+// from the v3 projectID); an unset clientID is a configuration error the
+// caller fixes by editing harmony_certs.go.
+func (c *Client) revokeURL() (string, error) {
+	if c.baseURL != "" {
+		return c.baseURL, nil
+	}
+	if clientID == "" {
+		return "", errors.New("harmony client ID not configured: set clientID in harmony/harmony_certs.go to revoke messages")
+	}
+	return fmt.Sprintf(revokeAPIURL, clientID), nil
+}
+
+// postOnce performs a single authenticated HTTP POST against a Huawei Push
+// Kit endpoint and parses the common response envelope shared by the v3
+// messages:send and v1 messages:revoke APIs. Both scenarios use the
+// service-account JWT and the "push-type: 0" (Alert) header.
+func (c *Client) postOnce(apiURL string, payload []byte) (httpStatus int, hmsCode int, err error) {
 	// Get a valid JWT
 	jwtToken, err := c.ts.Get()
 	if err != nil {
 		return 0, 0, fmt.Errorf("get auth token: %w", err)
-	}
-
-	// Use custom base URL if set, otherwise default
-	apiURL := c.baseURL
-	if apiURL == "" {
-		apiURL = fmt.Sprintf(sendAPIURL, projectID)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(payload))
@@ -344,8 +438,8 @@ func (c *Client) doSend(msg *Message) (httpStatus int, hmsCode int, err error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
-	// V3 scenario message API requires the "push-type" header.
-	// 0 = Alert (notification) message.
+	// The scenario message API requires the "push-type" header for both
+	// send and revoke; 0 = Alert (notification) message.
 	req.Header.Set(pushTypeHeader, pushTypeAlert)
 
 	resp, err := c.httpCli.Do(req)
