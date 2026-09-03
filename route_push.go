@@ -70,11 +70,11 @@ func initHarmony() {
 	})
 }
 
-var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int) (int, int, error) {
+var pushHarmony = func(targetTokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string) (int, int, error) {
 	if harmonyClient == nil {
 		return 0, 0, fmt.Errorf("harmony client not initialized")
 	}
-	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow)
+	return harmonyClient.Send(targetTokens, title, body, data, icon, actionType, setNum, sound, soundDuration, foregroundShow, inboxContent)
 }
 
 func init() {
@@ -315,6 +315,67 @@ func toInt(s string) (int, error) {
 	return n, err
 }
 
+// toInboxStrings coerces a V2 JSON array ([]interface{}), a V1 JSON-encoded
+// string (`'["a","b"]'`), or a plain V1 string into the []string form the
+// HarmonyOS V3 client expects for notification.inboxContent. Empty arrays and
+// empty strings yield nil so the field is omitted entirely.
+func toInboxStrings(v interface{}) []string {
+	switch val := v.(type) {
+	case []string:
+		out := make([]string, 0, len(val))
+		for _, s := range val {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(val))
+		for _, item := range val {
+			s := fmt.Sprint(item)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		// V1 query/form carries a single string; try JSON array first so
+		// `?inboxContent=["a","b"]` works, then fall back to a single-line
+		// array for bare strings.
+		var arr []string
+		if err := jsoniter.Unmarshal([]byte(val), &arr); err == nil {
+			out := make([]string, 0, len(arr))
+			for _, s := range arr {
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+		var raw []interface{}
+		if err := jsoniter.Unmarshal([]byte(val), &raw); err == nil {
+			out := make([]string, 0, len(raw))
+			for _, item := range raw {
+				s := fmt.Sprint(item)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+		if val != "" {
+			return []string{val}
+		}
+		return nil
+	default:
+		s := fmt.Sprint(val)
+		if s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+}
+
 // push dispatches a single logical push request to one or more devices.
 // rid is the request trace id threaded through every business log so a
 // multi-platform fan-out can be correlated back to one HTTP request.
@@ -422,6 +483,20 @@ func push(rid string, params map[string]interface{}) (int, error) {
 				msg.ExtParams["foregroundShow"] = n
 			} else {
 				msg.ExtParams["foregroundShow"] = 0
+			}
+		}
+	}
+	// InboxContent normalization: V2 JSON arrays arrive as []interface{}
+	// under the original-cased key; V1 string values may be JSON arrays or
+	// plain strings under the lowercase key. Convert to []string under the
+	// canonical lowercase key; empty arrays are dropped so the V3 client
+	// omits both inboxContent and style. HarmonyOS-only field (APNs just
+	// ignores it in the custom payload).
+	for _, k := range []string{"inboxContent", "inboxcontent"} {
+		if v, ok := msg.ExtParams[k]; ok {
+			delete(msg.ExtParams, k)
+			if s := toInboxStrings(v); len(s) > 0 {
+				msg.ExtParams["inboxcontent"] = s
 			}
 		}
 	}
@@ -615,9 +690,17 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		}
 	}
 
-	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d",
+	// Bark `inboxContent` is the V3 multi-line body; push() normalizes V2
+	// JSON arrays and V1 JSON-encoded strings to []string under the
+	// lowercase key. When non-empty the V3 client auto-sets style=3.
+	var inboxContent []string
+	if v, ok := msg.ExtParams["inboxcontent"]; ok {
+		inboxContent = toInboxStrings(v)
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d inboxLines=%d",
 		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
-		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow)
+		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow, len(inboxContent))
 
 	var badgeArg *int
 	if msg.HasBadge {
@@ -635,6 +718,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		soundStr,
 		soundDuration,
 		foregroundShow,
+		inboxContent,
 	)
 
 	if err != nil {

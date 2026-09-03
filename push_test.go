@@ -567,7 +567,7 @@ func TestHarmonyEmptyTitleFallback(t *testing.T) {
 	overridePushAPNs(t, func(*apns.PushMessage) (int, error) { return 200, nil })
 
 	var gotTitle, gotBody string
-	overridePushHarmony(t, func(_ []string, title, body, _, _ string, _ int, _ *int, _ string, _ int, _ int) (int, int, error) {
+	overridePushHarmony(t, func(_ []string, title, body, _, _ string, _ int, _ *int, _ string, _ int, _ int, _ []string) (int, int, error) {
 		gotTitle, gotBody = title, body
 		return 200, 0, nil
 	})
@@ -605,7 +605,7 @@ func TestHarmonySoundParams(t *testing.T) {
 
 	var gotSound string
 	var gotDuration int
-	overridePushHarmony(t, func(_ []string, _, _, _, _ string, _ int, _ *int, sound string, soundDuration int, _ int) (int, int, error) {
+	overridePushHarmony(t, func(_ []string, _, _, _, _ string, _ int, _ *int, sound string, soundDuration int, _ int, _ []string) (int, int, error) {
 		gotSound, gotDuration = sound, soundDuration
 		return 200, 0, nil
 	})
@@ -666,7 +666,7 @@ func TestPushUnregisteredDevice(t *testing.T) {
 
 // overridePushHarmony swaps the Harmony push seam for one test and restores
 // the original afterwards so multi-platform tests don't leak state into siblings.
-func overridePushHarmony(t *testing.T, pushFn func(tokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int) (int, int, error)) {
+func overridePushHarmony(t *testing.T, pushFn func(tokens []string, title, body, data, icon string, actionType int, setNum *int, sound string, soundDuration int, foregroundShow int, inboxContent []string) (int, int, error)) {
 	t.Helper()
 	orig := pushHarmony
 	pushHarmony = pushFn
@@ -707,7 +707,7 @@ func TestPushMultiPlatformFanOut(t *testing.T) {
 	var harmonyCalls int32
 	var harmonyTokens []string
 	var tokensMu sync.Mutex
-	overridePushHarmony(t, func(tokens []string, _, _, _, _ string, _ int, _ *int, _ string, _ int, _ int) (int, int, error) {
+	overridePushHarmony(t, func(tokens []string, _, _, _, _ string, _ int, _ *int, _ string, _ int, _ int, _ []string) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		tokensMu.Lock()
 		harmonyTokens = append(harmonyTokens, tokens...)
@@ -745,7 +745,7 @@ func TestPushMultiPlatformPlatformOverride(t *testing.T) {
 	})
 
 	var harmonyCalls int32
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		return 200, 0, nil
 	})
@@ -787,7 +787,7 @@ func TestPushMultiPlatformSkipClearedToken(t *testing.T) {
 	})
 
 	var harmonyCalls int32
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string) (int, int, error) {
 		atomic.AddInt32(&harmonyCalls, 1)
 		return 200, 0, nil
 	})
@@ -812,7 +812,7 @@ func TestPushMultiPlatformAllFail(t *testing.T) {
 	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
 		return 502, errors.New("BadGateway")
 	})
-	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int) (int, int, error) {
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string) (int, int, error) {
 		return 500, 80200003, errors.New("harmony error")
 	})
 
