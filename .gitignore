@@ -16,5 +16,6 @@ dist
 dev-data
 .idea/
 .vscode/
+.trae/
 
 deploy/data
