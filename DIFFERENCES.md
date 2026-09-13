@@ -13,6 +13,7 @@
 | 多平台 fan-out（同一 device_key 多端并存） | 数据库按 `(key, platform)` 唯一约束，**同一 `device_key` 可同时绑定 iOS 与鸿蒙记录**；推送时默认扇出到该 key 下所有有效平台（任一成功即 200，全部失败才 500），推送请求体的 `platform` 字段语义从"覆盖存储平台"改为"**收窄**到指定平台"；失效 token 清理改为按平台定向 `ClearDeviceTokenByKeyAndPlatform`，修复跨平台误清 bug | [TOKENS.md](docs/TOKENS.md) |
 | Gotify 兼容监控及其它消息相关接口 | 设备级 `GET /<device_key>/version`、`GET /<device_key>/message`、`GET /<device_key>/stream`(WebSocket)，让 hotify-bridge 能像监测 Gotify 一样监测 bark | [GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | 消息查找与导出 | 设备级 `GET /<device_key>/message` 支持 `?query=<关键词>`（title+body 不区分大小写子串匹配，响应含 `paging.total` 命中总数）与 `?limit=-1`（**分块流式导出**该设备全部现存消息，内存占用与总量无关） | [API.md](docs/API.md) |
+| 消息增量同步（v0.7.0） | `GET /<device_key>/message` 新增 `?after=<id>`（返回更新消息、**id 升序**、`paging.hasMore` 翻页，与 since/query/limit=-1 互斥）与 `?deletedSince=<cursor>`（响应顶层附 `deletions` 信封：单删 ids、清空 purges/ceiling、500 条/页独立分页、保留期缺口 reset 重播种）；新增删除流水（单删/清空/TTL 过期/容量淘汰同事务埋点，30 天保留，清理前写 reset 哨兵）；推送 `ttl` 参数真正生效——后台约每分钟扫描过期归档消息并删除、写流水；严格向后兼容（缺省参数行为不变，普通响应仅多 `paging.hasMore`，流式导出无此字段） | [API.md](docs/API.md)、[GOTIFY_COMPAT.md](docs/GOTIFY_COMPAT.md) |
 | MCP 推送 | `POST /mcp`、`POST /mcp/:device_key`，AI 代理可通过 Model Context Protocol 直接发推送 | [MCP.md](docs/MCP.md) |
 | Basic Auth | 可选 `--user/--password`，`/ping` `/register` `/healthz` `/info` 全局白名单 + 设备级 `/:device_key/version` `/:device_key/message` `/:device_key/stream` 白名单（`/info` 无凭据显示基础信息，带凭据才含设备数） | |
 | MySQL TLS | `--mysql-tls` 及配套 `mysql-ca`/`mysql-client-cert`/`mysql-client-key`/`mysql-tls-name`/`mysql-tls-skip-verify` | |

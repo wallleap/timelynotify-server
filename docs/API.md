@@ -450,20 +450,26 @@ curl "http://127.0.0.1:18080/my-device/version"
 
 ### GET /:device\_key/message
 
-查询该设备的历史推送消息（按设备隔离）。需 client token 鉴权。
+查询该设备的历史推送消息（按设备隔离）。需 client token 鉴权。支持客户端本地缓存的**向前增量同步**（`after`）与**删除事件同步**（`deletedSince`），二者自 **v0.7.0** 起提供。
 
 **Query 参数**
 
-| 字段    | 类型     | 默认  | 说明                      |
-| ----- | ------ | --- | ----------------------- |
-| limit | int    | 100 | 返回条数，min 1，max 200；`-1` 表示不限制，返回该设备全部现存消息（导出用） |
-| since | uint64 | 0   | 返回 id < since 的消息（分页游标） |
-| query | string | 空   | 关键词查找：对 title+body 做不区分大小写的子串匹配，与 limit/since 可组合；带 query 时响应 `paging` 额外返回 `total`（该设备命中总数，不受 limit 截断影响） |
-| token | string | 必填  | client token（鉴权用，优先级最高） |
+| 字段 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| limit | int | 100 | 返回条数，min 1，max 200；`-1` 表示不限制，返回该设备全部现存消息（流式导出用，不可与 after/deletedSince 组合） |
+| since | uint64 | 0 | 向后翻页：返回 id < since 的消息（消息按 id 倒序） |
+| after | uint64 | 缺省 | **向前增量**：返回 id > after 的消息，**按 id 升序**（客户端顺序重放）；`after=0` 为合法首游标（从最早消息开始升序返回），仅**缺省**该参数时保持既有的"最新消息、id 倒序"行为；与 since、query、limit=-1 互斥 |
+| deletedSince | uint64 | 缺省 | **删除事件游标**：响应顶层附带 `deletions` 信封（删除流水 id > 该游标，每页固定 500 条）；可与 after/since/query 任意组合，但不可与 limit=-1 组合 |
+| query | string | 空 | 关键词查找：对 title+body 做不区分大小写的子串匹配，与 limit/since/deletedSince 可组合；带 query 时响应 `paging` 额外返回 `total`（该设备命中总数，不受 limit 截断影响） |
+| token | string | 必填 | client token（鉴权用，优先级最高；也可用 `X-Gotify-Key` 头或 `Authorization: Bearer`） |
 
 ```sh
 curl "http://127.0.0.1:18080/my-device/message?limit=100&since=0&token=<clientToken>"
 # 或用头：curl -H "X-Gotify-Key: <clientToken>" "http://127.0.0.1:18080/my-device/message"
+# 向前增量同步（升序）：
+curl -H "X-Gotify-Key: <clientToken>" "http://127.0.0.1:18080/my-device/message?after=100&limit=200"
+# 增量同步 + 删除事件一次拿：
+curl -H "X-Gotify-Key: <clientToken>" "http://127.0.0.1:18080/my-device/message?after=100&deletedSince=305"
 # 关键词查找（响应含 paging.total）：
 curl "http://127.0.0.1:18080/my-device/message?query=cpu&limit=50&token=<clientToken>"
 # 全量导出：
@@ -474,7 +480,7 @@ curl "http://127.0.0.1:18080/my-device/message?limit=-1&token=<clientToken>"
 
 ```json
 {
-  "paging": {"size": 2, "limit": 100, "since": 0},
+  "paging": {"size": 2, "limit": 100, "since": 0, "hasMore": false},
   "messages": [
     {"id": 1, "device_key": "my-device", "title": "...", "body": "...", "...": "..."},
     {"id": 2, "device_key": "my-device", "title": "...", "body": "...", "...": "..."}
@@ -482,13 +488,83 @@ curl "http://127.0.0.1:18080/my-device/message?limit=-1&token=<clientToken>"
 }
 ```
 
+`paging` 字段：
+
+| 字段 | 出现条件 | 说明 |
+| --- | --- | --- |
+| size / limit / since | 总是（流式导出除外，其 `paging` 在末尾） | 与既有 gotify 语义一致；带 after 时 since 回显为 0 |
+| hasMore | **所有普通（非流式）响应都返回** | 翻页方向上是否还有更多消息：after/普通分页为精确值，query 查找为 `total > size`。旧客户端忽略未知字段，不受影响 |
+| after | 仅带 after 时 | 回显请求的 after 游标 |
+| total | 仅带 query 时 | 该设备命中总数（含 since 边界内的全部命中），不受 limit 截断 |
+
+带 after 的响应示例（消息升序）：
+
+```json
+{
+  "paging": {"size": 200, "limit": 200, "since": 0, "after": 100, "hasMore": true},
+  "messages": [{"id": 101, "...": "..."}, {"id": 102, "...": "..."}]
+}
+```
+
+**deletions 信封**（仅当请求带 `deletedSince` 时出现；不带时响应字节级与旧版一致，唯一差异是普通响应的 `paging` 恒多一个 `hasMore`）：
+
+```json
+{
+  "paging": {"size": 2, "limit": 100, "since": 0, "hasMore": false},
+  "messages": [ {"id": 101, "...": "..."} ],
+  "deletions": {
+    "ids": [12, 18],
+    "purges": [250],
+    "cursor": 305,
+    "hasMore": false,
+    "reset": false
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| ids | 本页「删除单条」事件对应的消息 id（升序）。来源包括：`DELETE /:id`、`ttl` 过期清扫、`--gotify-max-messages` 容量淘汰 |
+| purges | 本页「清空全部」事件的 ceiling（升序），即清空发生时刻该设备的最大消息 id；客户端删除本地所有 id ≤ ceiling 的缓存。多条时取 max 即可 |
+| cursor | 该设备删除流水当前最大 id。客户端持久化，下次作为 deletedSince；hasMore=true 时等于本页最后一条事件 id（用于翻页），终页为当前最大游标 |
+| hasMore | 本页事件超过 500 条时为 true，用返回的 cursor 继续翻页直到 false（每页固定上限 500，与消息的 limit 无关） |
+| reset | 客户端游标已落入流水保留期缺口（见下）：此时 ids/purges 必为空数组、cursor 为当前最大游标；客户端应**清空本地该设备缓存 → 用不带 after 的首页接口重新播种 → 以该 cursor 为基准增量** |
+
+删除流水只记录最近 **30 天**：后台清理任务每天扫描，删除过期行之前会为每个受影响设备先插入一条 reset 哨兵，因此设备最老一条流水永远是「此前列史已不可考」标记。游标判定：
+
+- `deletedSince=0`（首次同步基线）：ids/purges 为空、reset=false、cursor=当前最大 id（设备无任何流水时 cursor=0）。基线时刻之前的删除无需补——首次播种的消息快照本身就是删除后的状态；
+- `deletedSince>0` 且小于该设备流水最小 id（存在缺口）：reset=true；
+- 设备无任何流水记录：cursor=0、reset=false。
+
+> 推送时带正整数 `ttl`（秒，V1 query/form 或 V2 JSON 字段均可，如 `{"ttl":60}`）的归档消息，现在会由服务端后台扫描（约每分钟一次）在过期后自动删除，并逐条写入删除流水（与手工删除同样出现在 `deletions.ids`）；同一逻辑 id（`id` 参数覆写）重新推送会刷新其过期时刻。此前 `ttl` 仅文档声明、服务端不执行删除。
+
 > 普通分页请求不返回 `total`（避免额外全量扫描）；仅带 `query` 的查找请求返回。`query` 与 `limit=-1` 可组合（导出全部命中，此时 `total == size`）。
 >
-> **`limit=-1` 为分块流式响应**（chunked transfer）：服务端边遍历边逐条下发，内存占用与消息总量无关，上调 `--gotify-max-messages` 也不会放大单次导出成本。响应仍是一个合法 JSON 信封，但 `messages` 数组在前、`paging` 补在末尾（JSON 解析无影响），且恒含 `total`；流中途异常时响应会正常收尾并在 `paging.error` 标记 `"stream truncated"`。
+> **`limit=-1` 为分块流式响应**（chunked transfer）：服务端边遍历边逐条下发，内存占用与消息总量无关，上调 `--gotify-max-messages` 也不会放大单次导出成本。响应仍是一个合法 JSON 信封，但 `messages` 数组在前、`paging` 补在末尾（JSON 解析无影响），且恒含 `total`；流式响应不含 `hasMore`、`after` 与 `deletions`；流中途异常时响应会正常收尾并在 `paging.error` 标记 `"stream truncated"`。
 >
 > `query` 关键词会出现在访问日志的 URL 里（与其它 query 参数同等处理，仅 token 被脱敏），公网部署建议全程 TLS。
 
-**错误**：未带或错误 token → `401 {"code":401,"message":"unauthorized",...}`；服务未初始化 → `503`。
+**客户端增量同步协议**
+
+1. 首次接入：不带 after 拉首页（必要时用 since 向后翻页）播种本地缓存；同时以 `deletedSince=0` 获取基线 cursor 并持久化。
+2. 轮询（如 15s/设备）：`?after=<本地最大消息id>&deletedSince=<持久化cursor>&limit=200`。
+   - 消息按 id 升序顺序应用；返回条数 == limit 且 hasMore=true 时，以最后一条 id 作为新的 after 继续翻页，直到 hasMore=false；
+   - 删除事件按页处理，hasMore=true 时用返回的 cursor 连续翻页；
+   - 持久化消息最大 id 与删除 cursor（终页 cursor）。
+3. 应用删除事件的顺序：先按 `ids` 逐条删除本地消息 → 再按 `purges`（取 max ceiling）裁剪本地 id ≤ ceiling 的消息 → 若 `reset=true`，跳过本页应用，直接清空该设备缓存并回到第 1 步重新播种。
+4. 顺序安全性：消息 id 单调递增，purge 之后的新消息 id 必然大于 ceiling，故「先 ids 后 purges」与新消息增量互不冲突。
+
+**错误**：未带或错误 token → `401 {"code":401,"message":"unauthorized",...}`；参数互斥/非法 → `400 {"code":400,"message":...,"timestamp":...}`，message 取值：
+
+| 场景 | message |
+| --- | --- |
+| after 与 since 同时出现 | `after and since cannot be used together` |
+| after 与 query 同时出现 | `after and query cannot be used together` |
+| after 与 limit=-1 同时出现 | `after is not allowed with limit=-1` |
+| deletedSince 与 limit=-1 同时出现 | `deletedSince is not allowed with limit=-1` |
+| after/deletedSince 非数字、负数或溢出 | `invalid after parameter: "..."` / `invalid deletedSince parameter: "..."` |
+
+服务未初始化 → `503`。
 
 ### DELETE /:device\_key/message
 

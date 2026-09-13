@@ -17,6 +17,10 @@ type Message struct {
 	// filtering but kept out of the wire extras visible to the bridge (which
 	// already carries device_key in extras).
 	DeviceKey string `json:"-"`
+	// ExpiresAt is the unix-second deadline after which the message is
+	// removed by the TTL sweep. Zero means no expiry. Derived from the "ttl"
+	// extra at publish time; the deadline itself lives in the ttl index.
+	ExpiresAt int64 `json:"-"`
 }
 
 // SourceDevice returns the device this message originated from, reading the

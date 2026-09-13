@@ -14,9 +14,9 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 | Method | Path | 认证 | 说明 |
 | ----- | ---- | ---- | ----------- |
 | GET | `/<device_key>/version` | 无 | 设备级探测，返回服务版本号 |
-| GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息；`limit=-1` 流式导出全部（chunked，`paging` 在末尾且恒含 `total`），`?query=<关键词>` 按 title+body 不区分大小写查找并返回 `paging.total`（参数详见 [API.md](API.md#get-device_keymessage)） |
-| DELETE | `/<device_key>/message?token=<clientToken>` | `token` | 清空该设备的历史消息（其它设备保留） |
-| DELETE | `/<device_key>/message/<id>?token=<clientToken>` | `token` | 删除该设备下指定 id；不属于该设备或不存在返回 404 |
+| GET | `/<device_key>/message?token=<clientToken>&limit=10&since=<id>` | `token` | 该设备的历史消息；`limit=-1` 流式导出全部（chunked，`paging` 在末尾且恒含 `total`），`?query=<关键词>` 按 title+body 不区分大小写查找并返回 `paging.total`；`?after=<id>` 返回 id 更大的消息（**升序**，`paging.hasMore` 翻页）用于向前增量同步，`?deletedSince=<cursor>` 附带 `deletions` 删除事件信封（手工删除/清空/TTL 过期/容量淘汰，30 天保留，详见 [API.md](API.md#get-device_keymessage)，自 v0.7.0） |
+| DELETE | `/<device_key>/message?token=<clientToken>` | `token` | 清空该设备的历史消息（其它设备保留），并写入一条 purge 删除事件（ceiling=清空时最大消息 id） |
+| DELETE | `/<device_key>/message/<id>?token=<clientToken>` | `token` | 删除该设备下指定 id；不属于该设备或不存在返回 404；删除成功写入单条删除事件 |
 | GET | `/<device_key>/stream?token=<clientToken>` | `token` | WebSocket，实时推送该设备的裸消息帧 |
 
 设备级路径为**静态段**（`/version`、`/message`、`/stream`），优先于旧版 `GET /:device_key/:body` 兼容推送，不会与 `/<device_key>` 单段推送冲突。全局 gotify 接口已移除，仅保留设备级路径。

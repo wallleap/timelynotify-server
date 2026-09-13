@@ -1,5 +1,17 @@
 <a name="unreleased"></a>
 
+## [Unreleased]
+
+> 计划版本：v0.7.0
+
+### Features
+
+- **gotify:** 设备级 `GET /:device_key/message` 新增 `after` 参数，支持 id 升序的向前增量拉取与 `paging.hasMore` 翻页
+- **gotify:** 新增删除事件流水（手工单删/清空、TTL 过期、容量淘汰同事务埋点）与 `deletedSince` 参数，响应附带 `deletions` 信封（ids/purges/cursor/hasMore/reset），支持本地缓存增量同步
+- **gotify:** 删除流水保留 30 天，后台每日清理并为受影响设备写入 reset 哨兵；游标落入缺口时返回 reset，客户端清库重新播种
+- **gotify:** 推送的 `ttl`（秒）参数现在真正生效：后台约每分钟扫描删除过期归档消息并记录删除流水（此前仅文档声明）
+- 普通分页响应的 `paging` 恒返回 `hasMore` 字段（旧客户端忽略未知字段，流式导出不受影响）
+
 ## [v0.6.0](https://github.com/wallleap/timelynotify-server/compare/v0.5.3...v0.6.0)
 
 > 2026-09-03

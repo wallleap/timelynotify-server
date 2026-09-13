@@ -59,38 +59,68 @@ func routeGotifyDeviceVersion(c *fiber.Ctx) error {
 }
 
 // messageQuery holds the shared limit/since pagination parsed from a request,
-// plus the optional keyword search term.
+// plus the optional keyword search term and the incremental-sync cursors
+// (after / deletedSince).
 type messageQuery struct {
 	limit int
 	since uint64
+	// sincePresent reports whether the client supplied ?since (used for the
+	// after/since mutual-exclusion check).
+	sincePresent bool
 	// query is the keyword for title+body substring search; empty disables it.
 	query string
+	// after is the forward incremental cursor (return messages with id > after
+	// in ascending order); afterPresent reports its presence.
+	after        uint64
+	afterPresent bool
+	// deletedSince is the deletion-log cursor; deletedSincePresent reports
+	// whether the response must carry the deletions envelope.
+	deletedSince        uint64
+	deletedSincePresent bool
 }
 
 // parseMessageQuery reads limit (default 100, max 200, min 1; -1 disables the
 // cap and returns the full device history for export; 0 is kept as-is and
-// yields an empty result set — the safe-failure value), since (ID < since) and
-// query (search keyword) from the request.
-func parseMessageQuery(c *fiber.Ctx) messageQuery {
+// yields an empty result set — the safe-failure value), since (ID < since),
+// query (search keyword) and the incremental-sync cursors after /
+// deletedSince from the request. Malformed cursor values yield an error that
+// the caller maps to 400.
+func parseMessageQuery(c *fiber.Ctx) (messageQuery, error) {
+	q := messageQuery{}
 	limit := c.QueryInt("limit", 100)
 	if limit != -1 && limit != 0 {
 		limit = max(1, min(limit, 200))
 	}
-	var since uint64
+	q.limit = limit
 	if s := c.Query("since"); s != "" {
-		since, _ = strconv.ParseUint(s, 10, 64)
+		q.sincePresent = true
+		q.since, _ = strconv.ParseUint(s, 10, 64)
 	}
-	return messageQuery{limit: limit, since: since, query: strings.TrimSpace(c.Query("query"))}
+	q.query = strings.TrimSpace(c.Query("query"))
+	var err error
+	if q.after, q.afterPresent, err = gotifycompat.ParseCursor("after", c.Query("after")); err != nil {
+		return q, err
+	}
+	if q.deletedSince, q.deletedSincePresent, err = gotifycompat.ParseCursor("deletedSince", c.Query("deletedSince")); err != nil {
+		return q, err
+	}
+	return q, nil
 }
 
 // messageResponse wraps a message list in the gotify paging envelope. total is
 // the full match count (included in paging when >= 0, only meaningful for
-// search requests which already walk the full history).
-func messageResponse(messages []gotifycompat.Message, q messageQuery, total int) map[string]interface{} {
+// search requests which already walk the full history); hasMore reports
+// whether further messages remain in the pagination direction and is returned
+// on every non-streaming response (older clients ignore the unknown field).
+func messageResponse(messages []gotifycompat.Message, q messageQuery, total int, hasMore bool) map[string]interface{} {
 	paging := map[string]interface{}{
-		"size":  len(messages),
-		"limit": q.limit,
-		"since": q.since,
+		"size":    len(messages),
+		"limit":   q.limit,
+		"since":   q.since,
+		"hasMore": hasMore,
+	}
+	if q.afterPresent {
+		paging["after"] = q.after
 	}
 	if total >= 0 {
 		paging["total"] = total
@@ -142,7 +172,10 @@ func exportMessagesStream(c *fiber.Ctx, device string, q messageQuery) error {
 // routeGotifyDeviceMessage is the device-scoped GET /message: only messages of
 // the device_key in the URL path are returned. With ?query=<keyword> it
 // returns keyword matches (title+body, case-insensitive) and paging.total.
-// With limit<0 the response is streamed element by element.
+// With ?after=<id> it returns newer messages in ascending order for forward
+// incremental sync; with ?deletedSince=<cursor> the envelope additionally
+// carries a deletions page. With limit<0 the response is streamed element by
+// element (incompatible with after/deletedSince).
 func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 	if gotifyService == nil {
 		logger.Warnf("[Gotify] service not initialized for message query")
@@ -153,33 +186,73 @@ func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 		return c.Status(401).JSON(failed(401, "unauthorized"))
 	}
 
-	q := parseMessageQuery(c)
+	q, err := parseMessageQuery(c)
+	if err != nil {
+		logger.Warnf("[Gotify] bad message query: device_key=%s err=%v", c.Params("device_key"), err)
+		return c.Status(400).JSON(failed(400, "%s", err.Error()))
+	}
+	if err := gotifycompat.ValidateMessageListParams(
+		q.afterPresent, q.sincePresent, q.query != "", q.deletedSincePresent, q.limit); err != nil {
+		logger.Warnf("[Gotify] conflicting message query: device_key=%s err=%v", c.Params("device_key"), err)
+		return c.Status(400).JSON(failed(400, "%s", err.Error()))
+	}
 	device := c.Params("device_key")
-	logger.Infof("[Gotify] message query: device_key=%s limit=%d since=%d search=%t", device, q.limit, q.since, q.query != "")
+	logger.Infof("[Gotify] message query: device_key=%s limit=%d since=%d search=%t after=%d(%t) deletedSince=%d(%t)",
+		device, q.limit, q.since, q.query != "", q.after, q.afterPresent, q.deletedSince, q.deletedSincePresent)
 
 	// limit<0 → full export (with or without keyword): stream chunked so the
-	// response never materializes the whole set in memory.
+	// response never materializes the whole set in memory. after/deletedSince
+	// have already been rejected with 400 above.
 	if q.limit < 0 {
 		return exportMessagesStream(c, device, q)
 	}
 
-	if q.query != "" {
+	var (
+		resp  map[string]interface{}
+		count int
+	)
+	if q.afterPresent {
+		// Forward incremental sync: ids strictly greater than after, ascending.
+		messages, hasMore, err := gotifyService.MessagesAfterByDevice(device, q.after, q.limit)
+		if err != nil {
+			logger.Errorf("[Gotify] messages after failed: device_key=%s after=%d err=%v", device, q.after, err)
+			return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
+		}
+		count = len(messages)
+		resp = messageResponse(messages, q, -1, hasMore)
+	} else if q.query != "" {
 		messages, total, err := gotifyService.SearchMessagesByDevice(device, q.query, q.limit, q.since)
 		if err != nil {
 			logger.Errorf("[Gotify] message search failed: device_key=%s err=%v", device, err)
 			return c.Status(500).JSON(failed(500, "search messages failed: %v", err))
 		}
-		logger.Infof("[Gotify] message search success: device_key=%s count=%d total=%d", device, len(messages), total)
-		return c.JSON(messageResponse(messages, q, total))
+		count = len(messages)
+		resp = messageResponse(messages, q, total, total > count)
+	} else {
+		messages, hasMore, err := gotifyService.MessagesPageByDevice(device, q.limit, q.since)
+		if err != nil {
+			logger.Errorf("[Gotify] message query failed: device_key=%s err=%v", device, err)
+			return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
+		}
+		count = len(messages)
+		resp = messageResponse(messages, q, -1, hasMore)
 	}
 
-	messages, err := gotifyService.MessagesByDevice(device, q.limit, q.since)
-	if err != nil {
-		logger.Errorf("[Gotify] message query failed: device_key=%s err=%v", device, err)
-		return c.Status(500).JSON(failed(500, "get messages failed: %v", err))
+	// Deletion log page is independent of the message branch: it combines
+	// with after, since and query alike.
+	if q.deletedSincePresent {
+		page, err := gotifyService.DeletionsByDevice(device, q.deletedSince)
+		if err != nil {
+			logger.Errorf("[Gotify] deletions query failed: device_key=%s err=%v", device, err)
+			return c.Status(500).JSON(failed(500, "get deletions failed: %v", err))
+		}
+		resp["deletions"] = page
+		logger.Infof("[Gotify] deletions query success: device_key=%s ids=%d purges=%d cursor=%d hasMore=%t reset=%t",
+			device, len(page.IDs), len(page.Purges), page.Cursor, page.HasMore, page.Reset)
 	}
-	logger.Infof("[Gotify] message query success: device_key=%s count=%d", device, len(messages))
-	return c.JSON(messageResponse(messages, q, -1))
+
+	logger.Infof("[Gotify] message query success: device_key=%s count=%d", device, count)
+	return c.JSON(resp)
 }
 
 // routeGotifyDeviceMessageDeleteAll wipes only the given device's message
