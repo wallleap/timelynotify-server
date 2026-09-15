@@ -2,7 +2,7 @@
 
 本教程面向从零部署的使用者，把整个链路串起来：**iOS 设备注册 → 发 iOS 推送** 和 **鸿蒙设备注册 → 发 HarmonyOS 推送**。所有推送都会进入 Gotify 兼容监控流（供 hotify-bridge 订阅历史）。每一步都明确"哪个凭证填到哪里"。
 
-> 概念（是什么、由谁生成）见 [TOKENS.md](./TOKENS.md)；推送 API 参数见 [API_V2.md](./API_V2.md)；监控接口见 [GOTIFY_COMPAT.md](./GOTIFY_COMPAT.md)。
+> 概念（是什么、由谁生成）见 [TOKENS.md](./TOKENS.md)；推送 API 参数见 [API.md](./API.md)；监控接口见 [GOTIFY_COMPAT.md](./GOTIFY_COMPAT.md)。
 
 ## 1. 整体流程
 
@@ -31,7 +31,7 @@ HarmonyOS 推送流程:
 2. 点击「服务账号密钥」→「创建凭证」
 3. 操作类型选择「新建服务账号」，角色选择「管理员」
 4. 点击「生成公私钥」，然后「创建并下载 JSON」
-5. 打开 `harmony/harmony_certs.go`，将 JSON 中的四个字段填入：
+5. 打开 `harmony/harmony_certs.go`，将 JSON 中用于发送的四个字段填入：
 
     ```go
     var (
@@ -43,6 +43,8 @@ HarmonyOS 推送流程:
     -----END PRIVATE KEY-----`
     )
     ```
+
+   如需使用鸿蒙通知撤回（`revoke`），还要填入应用级 `clientID`（AGC「项目设置 → 常规 → 应用信息」中的 OAuth 2.0 Client ID，值等于 APP ID）；它不影响普通发送。
 
 6. 重启服务，日志中应看到 `HarmonyOS push client initialized`
 
@@ -115,7 +117,7 @@ export BARK_SERVER_GOTIFY_CLIENT_TOKEN='你的token'
 
 ```yaml
 # bridge_config.yaml
-gotify_url: http://<bark-host>:18080 # 或 http://<bark-host>:18080/<device_key>
+gotify_url: http://<bark-host>:18080/<device_key>
 gotify_token: <上面预置的 client token>
 ```
 
@@ -124,9 +126,9 @@ gotify_token: <上面预置的 client token>
 **验证监控链路**（用 header 传 token，避免 token 出现在 URL 与日志）：
 
 ```sh
-curl "http://<host>:18080/version"                             # 无需认证，返回版本
-curl -H "X-Gotify-Key: <clientToken>" "http://<host>:18080/message"   # 应返回 {"messages":[...]}
-curl -X DELETE -H "X-Gotify-Key: <clientToken>" "http://<host>:18080/message"  # 清空历史（可选）
+curl "http://<host>:18080/<device_key>/version" # 无需认证，返回版本
+curl -H "X-Gotify-Key: <clientToken>" "http://<host>:18080/<device_key>/message" # 应返回 {"messages":[...]}
+curl -X DELETE -H "X-Gotify-Key: <clientToken>" "http://<host>:18080/<device_key>/message" # 清空历史（可选）
 ```
 
 > `?token=` 查询参数也支持（gotify 协议兼容），但会进入 URL/访问日志——生产环境请用 header 并启用 TLS（`--cert`/`--key` 或反向代理），否则 token 在网络层是明文传输。

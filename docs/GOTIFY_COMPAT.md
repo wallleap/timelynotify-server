@@ -39,8 +39,8 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 - `date` 为 RFC3339Nano 字符串，桥按不透明字符串透传。
 - `priority` 由 bark 的 `level` 映射：`critical`/`timeSensitive`→2、`active`→1、其余→0。
 - token 读取优先级：`?token=` → `X-Gotify-Key` 头 → `Authorization: Bearer`（与 Gotify 相同）。
-  **推荐用 header 传递**（`X-Gotify-Key` 或 `Authorization: Bearer`）：token 不进入 URL，也就不会出现在
-  代理/网关与访问日志里（本服务端访问日志只记路径，不记 query）。注意：若开启了 Basic Auth，
+  **推荐用 header 传递**（`X-Gotify-Key` 或 `Authorization: Bearer`）：token 不进入 URL，可避免被
+  代理/网关的 URL 日志记录。本服务端会将 `?token=` 的值脱敏为 `***`，但不会控制外部代理日志。注意：若开启了 Basic Auth，
   `Authorization` 头已被 `Basic` 占用，Bearer 会被门禁拒绝（418），此时应改用 `X-Gotify-Key` 头或 `?token=`。
   生产部署务必启用 TLS
   （`--cert`/`--key` 或反向代理），否则任何 token 传递方式在网络层都是明文。
@@ -51,8 +51,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 - 通过环境变量 `BARK_SERVER_GOTIFY_CLIENT_TOKEN` 或启动参数 `--gotify-client-token` 预置
   （**强烈推荐**，可重复部署）。**只以 SHA-256 哈希存储**，不做明文持久化——即使
   `gotify.db` 泄露，也不存在可直接使用的凭证；同时避免自动生成路径把明文 token 写进数据文件。
-- 不设置时自动生成：以哈希持久化到 `<data>/gotify.db`（0600），**首次生成时打印一次**，
-  之后重启保持稳定；明文仅用于首次展示，丢失后请改用环境变量预置或删除该文件重新生成。
+- 不设置时自动生成：为保持重启稳定，明文 token 会保存到权限为 0600 的 `<data>/gotify.db`，同时也保存其哈希用于校验；**首次生成时打印一次**，之后重启不再打印。丢失后请改用环境变量预置或删除该文件重新生成。
 - 数据目录不可写时退化为内存存储（不持久化），hotify-bridge 靠 id 倒退信号兜底重启场景。
 - **查看自动生成的 token（Docker）**：首次启动（数据目录为空/新卷）时运行
   `docker logs -f timelynotify-server`（容器名按你的 `--name` 或 compose 服务名调整），

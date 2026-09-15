@@ -35,7 +35,7 @@ TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/b
 | `deploy/docker-compose.yaml` | Docker Compose 部署（远程镜像 `wallleap/timelynotify-server`） |
 | `deploy/docker-compose.local.yaml` | Docker Compose 部署（本地构建镜像，`bin/up` 默认使用） |
 | `deploy/timelynotify-server.service` | systemd 服务 |
-| `deploy/entrypoint.sh` | 容器入口，设置时区 |
+| `deploy/entrypoint.sh` | 容器入口，直接启动服务（时区在 Dockerfile 构建阶段写入） |
 | `deploy/helm-chart/` | Kubernetes Helm Chart |
 
 ### Docker

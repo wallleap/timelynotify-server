@@ -112,7 +112,7 @@
 - ✅ 全局限流中间件、Basic Auth 失败封禁、IP 白名单：未实现。→ 已加 IP 限流（`internal/ratelimit/`，`--rate-limit-ip` 作用于 `/register` `/mcp*`，`--rate-limit-push` 可覆盖推送端点；Basic Auth 失败封禁、IP 白名单仍未实现）。
 - ✅ 镜像非 root + Alpine 更新机制：未实现。→ 镜像已非 root（`app` uid 1000，见 `deploy/Dockerfile`）；Alpine 更新机制未实现。
 
-> 已落地项（具体见 `docs/DIFFERENCES.md` 与 README「安全建议」）：
+> 已落地项（具体见根目录 `DIFFERENCES.md` 与 README「安全建议」）：
 > - IP 限流：`--rate-limit-ip` / `--rate-limit-burst` / `--rate-limit-push`（`internal/ratelimit/`、`route_rate_limit.go`）。
 > - 镜像非 root：`app` 用户 + `USER app` + `/data` chown；同时修复了 entrypoint 改 `/etc/localtime` 在 `set -e` 下导致容器启动失败的问题。
 > - 无鉴权醒目警告：`route_auth.go` 未配置 Basic Auth 时打印多行 WARN 横幅。

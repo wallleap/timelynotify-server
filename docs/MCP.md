@@ -20,7 +20,7 @@ Cherry Studio:
   "mcpServers": {
     "bark": {
       "type": "streamableHttp",
-      "url": "https://api.day.app/mcp/{key}"
+      "url": "https://<your-host>/mcp/<device_key>"
     }
   }
 }
@@ -33,7 +33,7 @@ VS Code:
   "servers": {
     "bark": {
       "type": "http",
-      "url": "https://api.day.app/mcp/{key}"
+      "url": "https://<your-host>/mcp/<device_key>"
     }
   }
 }
@@ -42,7 +42,7 @@ VS Code:
 Claude Code:  
 
 ```sh
-claude mcp add bark --transport http https://api.day.app/mcp/{key}
+claude mcp add timelynotify --transport http https://<your-host>/mcp/<device_key>
 ```  
 
 or  
@@ -52,10 +52,10 @@ or
   "mcpServers": {
     "bark": {
       "type": "http",
-      "url": "https://api.day.app/mcp/{key}"
+      "url": "https://<your-host>/mcp/<device_key>"
     }
   }
 }
 ```
 
-> Note: Replace {key} in the URL with your own key.
+> Note: Replace `<your-host>` and `<device_key>` with this TimelyNotify Server deployment and the target device key. If `--url-prefix` is configured, include it before `/mcp`; use `/mcp` without a device key when the client should pass `device_key` as a tool argument.

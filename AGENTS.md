@@ -1,6 +1,6 @@
 # AGENTS.md — timelynotify-server
 
-Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs) **和 HarmonyOS (华为 Push Kit)** 推送服务，扩展了 Gotify 兼容监控接口（推送也会进入监控流）和 MCP 接口。不向上游回同步；二进制/镜像/module 均已独立命名。改动清单见 `docs/DIFFERENCES.md`。
+Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs) **和 HarmonyOS (华为 Push Kit)** 推送服务，扩展了 Gotify 兼容监控接口（推送也会进入监控流）和 MCP 接口。不向上游回同步；二进制/镜像/module 均已独立命名。改动清单见 `DIFFERENCES.md`。
 
 ## Project
 
@@ -56,6 +56,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 
 ## Constraints
 
+- **修改前核对**：任何改动前，先查阅与目标相关的项目文档和既有约定，再用 `git status`/`git diff` 检查是否存在用户手动修改的代码；不得覆盖、回退或混入无关的手动改动。需求、影响范围或预期行为不明确时，先向用户说明疑点并取得确认，再执行修改。
 - **不自动提交**：除非用户明确说"提交/commit"，一律只改文件不执行 `git commit`（包括 `--amend`）；改动完成后口头汇报，等用户指示再提交。
 - **提交前门禁**：`go build ./...` + `go vet ./...` + `go test ./internal/gotifycompat/` 必须全绿（package main 测试受 `deviceToken` 门槛限制，见 Commands）。
 - **提交信息**用 conventional commits（`feat:`/`fix:`/`docs:`/`chore:`/`build:`，可带 scope，如 `chore(deps):`）——与仓库现有历史保持一致。
@@ -63,7 +64,7 @@ Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs
 - **错误处理**：一律 wrap 后向上传播（`fmt.Errorf("...: %w", err)`），不吞错；对外错误信息用 `failed(code, msg, ...)` 统一返回。
 - **敏感信息**：client token、密码默认不写日志、不进提交；`device_key`/`device_token`/`client_token` 在业务日志中**中间脱敏后可写**（保留前 4 + `***` + 后 4，确保中间至少遮 4 个字符——长度 < 12 全 `***`，实现于 `internal/logging/sanitize.go` 的 `MaskMiddle`）。token 的"首次启动打印一次"是刻意设计（见 Notes），其余场景不打印。
 - **日志脱敏范围**：访问日志**不记录原始请求体**（fiberlogger 无 `${body}`；推送正文与敏感字段不进访问日志）；业务日志（V1/V2 入口、push 失败、APNs/鸿蒙失败等）记录**按字段脱敏后的请求体**——敏感字段 `device_token`/`devicetoken`/`token`/`client_token` 中间打码（`MaskMiddle`），其他字段原样保留（`MaskSensitiveFields`）。query 中仅 client token 脱敏（`?token=<值>` → `?token=***`，实现于 router.go 的 `redactingWriter`/`tokenParamRe`）；其它 query 参数（如 `GET /register?devicetoken=`）保持原样。fiberlogger 访问日志新增 `${locals:requestid}` 字段，与业务日志的 `rid=` 前缀对齐做链路贯通。
-- **文档同步**：新接口/新功能同步更新 `docs/`（README 文档列表里的对应文档）与 `docs/DIFFERENCES.md`（相对上游的改动清单）。
+- **文档同步**：新接口/新功能同步更新 `docs/`（README 文档列表里的对应文档）与根目录 `DIFFERENCES.md`（相对上游的改动清单）。
 - **改动聚焦**：一次改动解决一个问题，不顺手重构无关代码；新逻辑优先放 `internal/` 包（可测性，见 Testing）。
 - **分步提交**：一次提交只含一个逻辑单元（按步骤/功能拆分 commit），不把无关改动塞进同一 commit；使用中文提交信息，每步提交后仓库保持可构建（`go build ./...` 通过）。
 

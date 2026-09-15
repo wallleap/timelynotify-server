@@ -52,7 +52,7 @@ curl -X POST http://<host>:18080/register \
 ## 5. 华为 Push Kit 服务账号凭证
 
 - **是什么**：服务端调用华为 Push Kit API 时使用的鉴权凭证。采用"服务账号 JWT"方式（HarmonyOS NEXT 推荐）。
-- **包含四个字段**：`keyID`、`subAccount`、`projectID`、`privateKey`。
+- **发送所需四个字段**：`keyID`、`subAccount`、`projectID`、`privateKey`。如需使用消息撤回（`revoke`），还需配置应用级 `clientID`（普通发送不需要）。
 - **谁生成**：**华为开发者联盟**控制台（`https://developer.huawei.com/consumer/cn/console/api/myApi`）。
 - **配置方式**：将凭证填入 `harmony/harmony_certs.go` 文件。
 - **⚠️ 安全提示**：**禁止将真实凭证提交到公开仓库**。`privateKey` 是 RSA 私钥，一旦泄露可被伪造 JWT 发送任意推送。

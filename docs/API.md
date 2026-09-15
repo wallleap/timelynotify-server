@@ -233,7 +233,7 @@ curl -X POST "http://127.0.0.1:18080/push" \
   "timestamp": 1700000000,
   "data": [
     {"code": 200, "device_key": "ynJ5Ft4atkMkWeo2PAvFhF"},
-    {"code": 410, "device_key": "nysrshcqielvoxsa", "message": "push failed: ..."}
+    {"code": 500, "device_key": "nysrshcqielvoxsa", "message": "push failed: ..."}
   ]
 }
 ```
@@ -271,7 +271,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
 | 字段           | 类型       | iOS                                                          | HarmonyOS                                                    |
 | -------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| id             | string     | 使用相同的ID值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2, bark-server v2.2.5 以上，Json传参需使用字符串类型<br/>传 `id` 时监控流（`/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `revoke` 撤回模式的目标 notifyId（见 [通知撤回](#通知撤回仅鸿蒙)） |
+| id             | string / integer | 使用相同的 ID 值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2、bark-server v2.2.5 以上；V2 JSON 可传字符串或整数，服务端会保留整数的精确十进制形式<br/>传 `id` 时监控流（`/:device_key/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `revoke` 撤回模式的目标 notifyId（见 [通知撤回](#通知撤回仅鸿蒙)） |
 | revoke         | bool/string | -                                                           | 真值（JSON `true`/非零数字，query 的 `1`/`true`/`yes`/`on` 或裸 `?revoke`）进入**撤回模式**：用 `id`（原通知 notifyId，须正整数）撤回该 key 下鸿蒙设备上尚未点击/未下发的通知，调用华为 v1 `messages:revoke`；忽略其它所有推送参数、不写监控流；仅鸿蒙生效（iOS 无远程撤回 API），无鸿蒙记录返回 400；需在 `harmony/harmony_certs.go` 配置应用级 `clientID`，详见 [通知撤回](#通知撤回仅鸿蒙) |
 | level          | string     | APNs 优先级：`critical`/`active`/`timeSensitive`/`passive`   | -                                                            |
 | volume         | string     | critical 通知铃声音量                                        | -                                                            |
