@@ -4,10 +4,66 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+func TestMergeClickActionData(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		url  string
+		want map[string]interface{}
+	}{
+		{
+			name: "url only",
+			url:  "https://example.com/orders/42",
+			want: map[string]interface{}{"url": "https://example.com/orders/42"},
+		},
+		{
+			name: "preserves JSON object data",
+			data: `{"orderId":42,"source":"bark"}`,
+			url:  "https://example.com/orders/42",
+			want: map[string]interface{}{
+				"orderId": float64(42),
+				"source":  "bark",
+				"url":     "https://example.com/orders/42",
+			},
+		},
+		{
+			name: "wraps non-JSON data",
+			data: "opaque payload",
+			url:  "https://example.com",
+			want: map[string]interface{}{
+				"data": "opaque payload",
+				"url":  "https://example.com",
+			},
+		},
+		{
+			name: "URL overrides data URL",
+			data: `{"url":"https://old.example.com","keep":true}`,
+			url:  "https://new.example.com",
+			want: map[string]interface{}{
+				"url":  "https://new.example.com",
+				"keep": true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got map[string]interface{}
+			if err := json.Unmarshal([]byte(MergeClickActionData(tt.data, tt.url)), &got); err != nil {
+				t.Fatalf("unmarshal merged data: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("MergeClickActionData(%q, %q) = %#v, want %#v", tt.data, tt.url, got, tt.want)
+			}
+		})
+	}
+}
 
 // TestClient_Send_EmptyTokens verifies that sending with no tokens fails early.
 func TestClient_Send_EmptyTokens(t *testing.T) {

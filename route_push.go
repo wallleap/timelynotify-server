@@ -780,6 +780,9 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	if customData, ok := msg.ExtParams["data"].(string); ok {
 		dataStr = customData
 	}
+	if pushURL, ok := msg.ExtParams["url"].(string); ok {
+		dataStr = harmony.MergeClickActionData(dataStr, pushURL)
+	}
 
 	// Bark `icon` stays in ExtParams for the APNs custom payload; Harmony
 	// maps it to notification.image (large icon URL, HTTPS required).

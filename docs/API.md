@@ -288,7 +288,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 | markdown       | string     | Markdown 正文，覆盖 `body`                                   |                                                              |
 | isArchive      | string     | `1` 时由 App 归档                                            | -                                                            |
 | ttl            | integer    | 归档消息存活秒数，过期自动删除                               | -                                                            |
-| url            | string     | 点击通知跳转的 URL                                           | -                                                            |
+| url            | string     | 点击通知跳转的 URL                                           | 写入 `notification.clickAction.data.url`；若同时传 `data`，会保留其中其它键，且此字段覆盖 `data.url` |
 | action         | string     | 传 "alert" 时，点击推送跳转到APP时会弹出操作弹窗             | 目前固定点击跳转应用首页                                     |
 | delete         | string     | `1` 时静默推送（不展示，ContentAvailable）                   | -                                                            |
 | foregroundShow | `string`   | -                                                            | 默认 `1`，应用在前后台都展示通知消息，其它值应用在前台时不通知 |

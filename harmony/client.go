@@ -313,6 +313,30 @@ func parseDataField(data string) map[string]interface{} {
 	return map[string]interface{}{"data": data}
 }
 
+// MergeClickActionData adds a Bark URL to the V3 clickAction data payload.
+// Existing JSON-object data is preserved; non-JSON data remains available
+// under the "data" key. A URL from the push request takes precedence over a
+// pre-existing data.url value so notification clicks follow the request URL.
+func MergeClickActionData(data, url string) string {
+	if url == "" {
+		return data
+	}
+
+	values := make(map[string]interface{})
+	if data != "" {
+		values = parseDataField(data)
+	}
+	values["url"] = url
+
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		// values only comes from JSON-decoded data plus strings, so marshaling
+		// should not fail. Preserve the original custom data defensively.
+		return data
+	}
+	return string(encoded)
+}
+
 // normalizeSoundName maps a Bark ringtone name to the HarmonyOS rawfile
 // file name expected by the V3 notification.sound field. HarmonyOS
 // resolves custom ringtones under the app's /resources/rawfile directory
