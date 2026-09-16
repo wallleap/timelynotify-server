@@ -40,6 +40,11 @@ jobs:
         with:
           context: .
           file: ./deploy/Dockerfile
+          # GitHub Actions runners are US/global — use the global Go proxy
+          # (fast & reliable there). The Dockerfile default (goproxy.cn) stays
+          # for local China builds where proxy.golang.org is unreachable.
+          build-args: |
+            GOPROXY=https://proxy.golang.org,direct
           platforms: |
             linux/arm
             linux/arm64
