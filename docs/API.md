@@ -13,8 +13,9 @@ TimelyNotify Server HTTP API 参考。兼容上游 Bark V1（URL 路径参数推
   - [POST /push（V2 单设备推送）](#post-pushv2-单设备推送)
   - [POST /push（V2 批量推送）](#post-pushv2-批量推送)
   - [V1 兼容推送（路径参数）](#v1-兼容推送路径参数)
-  - [Push 字段参考](#push-字段参考)
+  - [Push 其它字段参考](#push-其它字段参考)
   - [多平台扇出](#多平台扇出)
+  - [通知撤回（仅鸿蒙）](#通知撤回仅鸿蒙)
   - [参数优先级](#参数优先级)
   - [HarmonyOS 推送](#harmonyos-推送)
 - [设备注册](#设备注册)
@@ -340,6 +341,37 @@ curl "http://127.0.0.1:18080/<your key>?revoke=1&id=12345"
 3. **URL 路径参数（path）** — V1 路径段最高
 
 例：`POST /:device_key/:title/:body?sound=minuet` body `{"sound":"alarm"}` 最终 `sound=minuet`（query 覆盖 body）+ `title`/`body` 来自路径（最高）。
+
+### HarmonyOS 推送
+
+推送鸿蒙设备与 iOS 使用完全相同的 API。
+
+> **`level` 字段是 APNs 概念，华为 V3 无直接对应**：V3 的 `clickAction` 是对象 `{actionType: 0|1}`（0=点击进应用首页、1=进内页），不再是 V1 的 `launch`/`banner`/`page` 字符串。服务端统一用 `actionType=0`（点击进应用首页），V3 通知展示样式由系统按 `category` 与前台状态决定，不再有 launch/banner/page 之分。
+>
+> 华为 V3 场景化消息：`category` 默认 `SUBSCRIPTION`（需在 AGC 申请「通知消息自分类权益」并通过审核，否则降级 `MARKETING` 受每设备每日 2/5 条频控且自定义铃声失效）；`foregroundShow` 默认 `true`；`pushOptions.ttl` 默认 86400。
+
+完整流程示例：
+
+```sh
+# 1. 注册鸿蒙设备
+curl -X POST "http://127.0.0.1:18080/register" \
+     -H 'Content-Type: application/json' \
+     -d '{
+  "device_key": "my-harmony-device",
+  "device_token": "<harmony_push_token>",
+  "platform": "harmony"
+}'
+
+# 2. 推送（与 iOS 推送格式完全相同）
+curl -X POST "http://127.0.0.1:18080/push" \
+     -H 'Content-Type: application/json' \
+     -d '{
+  "device_key": "my-harmony-device",
+  "title": "鸿蒙测试通知",
+  "body": "这是一条鸿蒙推送测试消息",
+  "level": "active"
+}'
+```
 
 ## 设备注册
 
