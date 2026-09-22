@@ -23,6 +23,11 @@ import (
 
 const DEFAULT_TITLE = "订阅通知"
 
+const (
+	harmonyEncryptedTitle = "[订阅] 加密通知"
+	harmonyEncryptedBody  = "请打开及时通知查看加密内容"
+)
+
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 
@@ -835,15 +840,48 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		}
 	}
 
-	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d inboxLines=%d notifyId=%d",
-		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
-		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow, len(inboxContent), notifyId)
-
 	var badgeArg *int
 	if msg.HasBadge {
 		v := msg.Badge
 		badgeArg = &v
 	}
+
+	// Without Huawei's restricted push-type 2 entitlement, encrypted
+	// HarmonyOS messages use an ordinary Alert carrying only safe placeholder
+	// content. The opaque ciphertext and IV remain in the stored monitor
+	// message, so the app can fetch and decrypt them after the user opens it.
+	if ciphertext, ok := msg.ExtParams["ciphertext"].(string); ok && strings.TrimSpace(ciphertext) != "" {
+		logger.Infof("[Push] rid=%s HarmonyOS encrypted placeholder push: device_key=%s token=%s notifyId=%d",
+			rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), notifyId)
+		_, hmsCode, err := pushHarmony(
+			[]string{deviceInfo.Token},
+			harmonyEncryptedTitle,
+			harmonyEncryptedBody,
+			"",
+			"",
+			actionType,
+			badgeArg,
+			soundStr,
+			soundDuration,
+			foregroundShow,
+			nil,
+			notifyId,
+		)
+		if err != nil {
+			if hmsCode == 80200001 {
+				logger.Warnf("[Push] rid=%s HarmonyOS invalid token, clearing: device_key=%s platform=%s token=%s hmsCode=%d",
+					rid, logging.MaskMiddle(msg.DeviceKey), deviceInfo.Platform, logging.MaskMiddle(deviceInfo.Token), hmsCode)
+				_ = db.ClearDeviceTokenByKeyAndPlatform(msg.DeviceKey, deviceInfo.Platform)
+			}
+			return 500, fmt.Errorf("harmony encrypted placeholder push failed (code %d): %w", hmsCode, err)
+		}
+		return 200, nil
+	}
+
+	logger.Infof("[Push] rid=%s HarmonyOS push: device_key=%s token=%s actionType=%d hasImage=%v hasData=%v hasSound=%v foregroundShow=%d inboxLines=%d notifyId=%d",
+		rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token),
+		actionType, iconStr != "", dataStr != "", soundStr != "", foregroundShow, len(inboxContent), notifyId)
+
 	_, hmsCode, err := pushHarmony(
 		[]string{deviceInfo.Token},
 		title,

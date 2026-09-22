@@ -17,6 +17,7 @@ TimelyNotify Server 是 [Bark](https://github.com/Finb/Bark) 服务端（[Finb/b
 
 - 独立的 Go module、二进制名与 Docker 镜像名（`wallleap/timelynotify-server`）
 - 原生 HarmonyOS 推送支持（华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由）
+- HarmonyOS 端到端加密安全占位通知（`ciphertext` 非空时发送普通通知，标题固定为 `[订阅] 加密通知`；明文仅在客户端打开后解密）
 - 内置 [Gotify 兼容接口](./docs/GOTIFY_COMPAT.md)（设备级 `/<device_key>/version`、`/<device_key>/message`、`/<device_key>/stream` 等）
 - 内置 [MCP](./docs/MCP.md) 接口（`/mcp`、`/mcp/:device_key`），AI 代理可直接调用推送
 - 可选 Basic Auth、MySQL TLS、gotify 客户端 token 等
