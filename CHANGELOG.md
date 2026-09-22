@@ -1,11 +1,29 @@
 <a name="unreleased"></a>
 
-## [v0.7.0](https://github.com/wallleap/timelynotify-server/compare/v0.6.0...v0.7.0)
+## [v0.7.1](https://github.com/wallleap/timelynotify-server/compare/v0.7.0...v0.7.1)
 
-> 2026-09-15
+> 2026-09-22
 
 ### Documentation
 
+- 修正 API 文档 TOC 与 HarmonyOS 推送章节
+
+### Features
+
+- **harmony:** 支持加密通知安全占位推送
+
+
+## [v0.7.0](https://github.com/wallleap/timelynotify-server/compare/v0.6.0...v0.7.0)
+
+> 2026-09-16
+
+### Bug Fixes
+
+- **ci:** 使用全局 Go 代理避免 goproxy.cn 流错误
+
+### Documentation
+
+- update CHANGELOG for v0.7.0
 - 同步文档与实际行为
 
 ### Features
