@@ -285,7 +285,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 | icon           | string     | 图标 URL（iOS 15+）                                          | 华为会自动校验图片是否合规，必须是 HTTPS URL，支持图片格式为PNG、JPG、JPEG、BMP、WEBP，图片像素的总字节数不超过192KB，若超过则图片不展示 |
 | image          | string     | 图片 URL（iOS 15+）                                          | -                                                            |
 | group          | string     | 通知分组                                                     |                                                              |
-| ciphertext     | string     | 加密推送的 Base64 密文                                       | 使用普通 `push-type: 0` 发送安全占位通知；标题固定为 `[订阅] 加密通知`，服务端不解密 |
+| ciphertext     | string     | 加密推送的 Base64 密文                                       | 使用普通 `push-type: 0` 发送安全占位通知；归档与非归档使用不同提示文案，服务端不解密 |
 | iv             | string     | 发送端逐条生成的 IV；ECB 可省略                              | 保存在消息历史中，供 Harmony 客户端打开后本地解密             |
 | markdown       | string     | Markdown 正文，覆盖 `body`                                   |                                                              |
 | isArchive      | string     | `1` 或省略时由 App 归档；显式传其它值时不归档                | 同 iOS；未归档的普通通知不写历史。未归档的加密通知会暂存至客户端成功同步并删除远端，不在本地保留 |
@@ -303,8 +303,8 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
 请求包含非空 `ciphertext` 时，iOS 仍沿用 Bark/APNs 加密字段；HarmonyOS 因普通应用无法取得 `push-type: 2` 扩展通知权益，直接使用普通 `push-type: 0` 通知：
 
-- `payload.notification.title` 固定为 `[订阅] 加密通知`；
-- `payload.notification.body` 固定为 `请打开及时通知查看加密内容`；
+- 缺省或 `isArchive=1`：标题为 `[订阅] 加密通知`，正文为 `请打开及时通知查看加密内容`；
+- 显式关闭归档：标题为 `[订阅] 加密即时通知`，正文为 `请打开及时通知解密并查看，此通知不会保存到历史记录`；
 - 通知中不携带 `ciphertext`、`iv`、原始标题、正文、图标、链接或 inbox 内容；
 - 铃声、角标、前台展示设置和 `notifyId` 仍然生效；
 - `ciphertext` 与 `iv` 保存在监控消息历史中，用户打开客户端后拉取并在本地解密；
