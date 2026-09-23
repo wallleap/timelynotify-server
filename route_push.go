@@ -794,12 +794,9 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 		dataStr = harmony.MergeClickActionData(dataStr, pushURL)
 	}
 
-	// Bark `icon` stays in ExtParams for the APNs custom payload; Harmony
-	// maps it to notification.image (large icon URL, HTTPS required).
-	var iconStr string
-	if icon, ok := msg.ExtParams["icon"].(string); ok {
-		iconStr = icon
-	}
+	// Huawei exposes one notification.image URL. Bark icon has priority;
+	// Bark image is the fallback when no icon was supplied.
+	iconStr := pushpolicy.HarmonyImageURL(msg.ExtParams)
 
 	// Bark `sound` is the raw ringtone name (shared across platforms);
 	// the V3 client appends ".mp3" for the HarmonyOS /resources/rawfile
