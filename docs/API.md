@@ -282,8 +282,8 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 | copy           | string     | 待复制的文本                                                 | -                                                            |
 | sound          | string     | 铃声名（自动补 `.caf` 后缀），见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds) | 铃声名与 Bark 一致，自动补 `.mp3` 后缀（已带 `.mp3`/`.wav`/`.mpeg` 后缀则保持不变，`.caf` 自动转 `.mp3`）；铃声文件需放在应用 `/resources/rawfile` 目录，且需在 AGC 申请「自定义铃声权益」，`category=MARKETING` 时自定义铃声无效 |
 | soundDuration  | integer    | -                                                            | 通知铃声时长（单位秒），仅同时传了 `sound` 才生效，取值范围 `[1, 60]`（超出自动截断为 60），铃声不足该时长会循环播放；不传时铃声超过 30 秒截断 |
-| icon           | string     | 图标 URL（iOS 15+）                                          | 华为会自动校验图片是否合规，必须是 HTTPS URL，支持图片格式为PNG、JPG、JPEG、BMP、WEBP，图片像素的总字节数不超过192KB，若超过则图片不展示 |
-| image          | string     | 图片 URL（iOS 15+）                                          | -                                                            |
+| icon           | string     | 图标 URL（iOS 15+）                                          | 通知图 URL，优先映射到华为 `notification.image`；客户端列表/详情作为左侧图标显示 |
+| image          | string     | 图片 URL（iOS 15+）                                          | `icon` 为空时回退映射到华为 `notification.image`；客户端列表作为右侧缩略图、详情作为正文大图显示。华为会自动校验图片，要求 HTTPS，支持 PNG/JPG/JPEG/BMP/WEBP，总字节数不超过 192KB |
 | group          | string     | 通知分组                                                     |                                                              |
 | ciphertext     | string     | 加密推送的 Base64 密文                                       | 使用普通 `push-type: 0` 发送安全占位通知；归档与非归档使用不同提示文案，服务端不解密 |
 | iv             | string     | 发送端逐条生成的 IV；ECB 可省略                              | 保存在消息历史中，供 Harmony 客户端打开后本地解密             |
@@ -305,7 +305,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
 - 缺省或 `isArchive=1`：标题为 `[订阅] 加密通知`，正文为 `请打开及时通知查看加密内容`；
 - 显式关闭归档：标题为 `[订阅] 加密即时通知`，正文为 `请打开及时通知解密并查看，此通知不会保存到历史记录`；
-- 通知中不携带 `ciphertext`、`iv`、原始标题、正文、图标、链接或 inbox 内容；
+- 通知中不携带 `ciphertext`、`iv`、原始标题、正文、图标、内容图、链接或 inbox 内容；
 - 铃声、角标、前台展示设置和 `notifyId` 仍然生效；
 - `ciphertext` 与 `iv` 保存在监控消息历史中，用户打开客户端后拉取并在本地解密；
 - 服务端不持有加密 Key、不解析密文、不解密消息。
