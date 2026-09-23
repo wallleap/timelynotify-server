@@ -8,6 +8,7 @@
 
 | 功能 | 说明 | 文档 |
 | ----- | ----------- | ---- |
+| Bark 归档与 TTL 语义对齐 | 接入 `isArchive`：缺省或 `1` 保持归档，显式关闭时普通通知不写监控历史；端到端加密的 Harmony 通知为完成本地解密而临时保留，客户端同步后删除且不落本地。正整数 `ttl` 继续控制远端历史过期，并透传给 Harmony 客户端用于本地历史过期清理 | [API.md](docs/API.md) |
 | HarmonyOS 端到端加密安全占位通知 | 检测非空 `ciphertext` 后使用普通 `push-type: 0` 发送 `[订阅] 加密通知` 安全占位内容；密文与 IV 仅保留在监控历史供客户端打开后拉取并本地解密，服务端不保存 Key、不解密明文 | [API.md](docs/API.md) |
 | 原生 HarmonyOS 推送 | 华为 Push Kit 服务账号 JWT 鉴权，与 iOS APNs 并存，统一 API 按 `platform` 路由；Bark `level` 无 V3 直接对应，点击统一进入应用首页（`actionType=0`）；Bark `url` 写入 `notification.clickAction.data.url` | [API.md](docs/API.md) |
 | 鸿蒙通知撤回（revoke） | 推送请求带真值 `revoke` + `id`（原 notifyId，正整数）时，调用华为 v1 `messages:revoke` 撤回该 key 下鸿蒙设备上未点击/未下发的通知；仅鸿蒙生效（iOS 无远程撤回），忽略其它推送参数、不写监控流；撤回端点用应用级 `clientID`（与发送的 v3 `projectId` 不同，在 `harmony/harmony_certs.go` 配置，留空不影响发送）；V1/V2/批量/MCP 全入口支持 | [API.md](docs/API.md) |

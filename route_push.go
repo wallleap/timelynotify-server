@@ -17,6 +17,7 @@ import (
 	"github.com/wallleap/timelynotify-server/database"
 	"github.com/wallleap/timelynotify-server/harmony"
 	"github.com/wallleap/timelynotify-server/internal/logging"
+	"github.com/wallleap/timelynotify-server/internal/pushpolicy"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -680,9 +681,18 @@ func push(rid string, params map[string]interface{}) (int, error) {
 		logger.Infof("[Push] rid=%s platform resolved: device_key=%s targets=%d", rid, maskedKey, len(targets))
 	}
 
-	// Record the push to the monitoring stream once per logical request,
-	// independent of how many platforms actually receive it.
-	gotifyPublish(&msg)
+	// Record the push once per logical request. A no-archive encrypted Harmony
+	// message is retained only long enough for the client to fetch and decrypt it.
+	hasHarmonyTarget := false
+	for _, target := range targets {
+		if target.Platform == "harmony" {
+			hasHarmonyTarget = true
+			break
+		}
+	}
+	if pushpolicy.ShouldPublishHistory(msg.ExtParams, hasHarmonyTarget) {
+		gotifyPublish(&msg)
+	}
 
 	if len(targets) == 1 {
 		return pushToDevice(rid, targets[0], &msg)
