@@ -1,11 +1,28 @@
 <a name="unreleased"></a>
 
+## [v0.7.2](https://github.com/wallleap/timelynotify-server/compare/v0.7.1...v0.7.2)
+
+> 2026-09-23
+
+### Documentation
+
+- 更新 API 文档中 autoCopy 和 copy 字段的详细说明
+- 更新 HarmonyOS 推送相关文档说明
+- 更新 HarmonyOS 加密通知的占位文案说明
+
+### Features
+
+- 新增鸿蒙推送图片URL获取工具及测试
+- **push:** 接入 isArchive 与 ttl 归档策略
+
+
 ## [v0.7.1](https://github.com/wallleap/timelynotify-server/compare/v0.7.0...v0.7.1)
 
 > 2026-09-22
 
 ### Documentation
 
+- update CHANGELOG for v0.7.1
 - 修正 API 文档 TOC 与 HarmonyOS 推送章节
 
 ### Features
