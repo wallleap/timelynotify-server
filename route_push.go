@@ -24,11 +24,6 @@ import (
 
 const DEFAULT_TITLE = "订阅通知"
 
-const (
-	harmonyEncryptedTitle = "[订阅] 加密通知"
-	harmonyEncryptedBody  = "请打开及时通知查看加密内容"
-)
-
 // Maximum number of batch pushes allowed, -1 means no limit
 var maxBatchPushCount = -1
 
@@ -861,12 +856,13 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	// content. The opaque ciphertext and IV remain in the stored monitor
 	// message, so the app can fetch and decrypt them after the user opens it.
 	if ciphertext, ok := msg.ExtParams["ciphertext"].(string); ok && strings.TrimSpace(ciphertext) != "" {
+		placeholderTitle, placeholderBody := pushpolicy.EncryptedPlaceholder(msg.ExtParams)
 		logger.Infof("[Push] rid=%s HarmonyOS encrypted placeholder push: device_key=%s token=%s notifyId=%d",
 			rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), notifyId)
 		_, hmsCode, err := pushHarmony(
 			[]string{deviceInfo.Token},
-			harmonyEncryptedTitle,
-			harmonyEncryptedBody,
+			placeholderTitle,
+			placeholderBody,
 			"",
 			"",
 			actionType,
