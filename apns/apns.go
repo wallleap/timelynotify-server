@@ -43,9 +43,21 @@ func (p PushMessage) IsEmptyAlert() bool {
 	return p.Title == "" && p.Body == "" && p.Subtitle == ""
 }
 
+// IsDelete reports whether the push carries the Bark-compatible `delete`
+// flag (silent-push removal). JSON bools (`"delete":true`) are accepted
+// alongside the historical "1"/1/1.0 shapes.
 func (p PushMessage) IsDelete() bool {
-	val := p.ExtParams["delete"]
-	return val == "1" || val == 1 || val == 1.0
+	switch val := p.ExtParams["delete"].(type) {
+	case string:
+		return val == "1"
+	case bool:
+		return val
+	case int:
+		return val == 1
+	case float64:
+		return val == 1
+	}
+	return false
 }
 
 const (

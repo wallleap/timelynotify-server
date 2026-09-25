@@ -506,15 +506,6 @@ func push(rid string, params map[string]interface{}) (int, error) {
 				}
 			case "platform":
 				msg.ExtParams["_platform"] = val
-			case "revoke":
-				// HarmonyOS-only notification withdrawal. A truthy flag
-				// plus `id` (the original notifyId) short-circuits the push
-				// pipeline into pushRevoke(); every other push parameter
-				// (title/body/sound/...) is ignored. V2 JSON bool/number
-				// forms bypass the string case and are normalized below.
-				if isTruthyFlag(val) {
-					msg.ExtParams["_revoke"] = true
-				}
 			case "icon":
 				// Users often copy example URLs wrapped in backticks/whitespace
 				// from docs; APNs image loading and Huawei image download both
@@ -600,19 +591,20 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			}
 		}
 	}
-	// Revoke flag normalization: V1 query/form values land under the
-	// lowercase "revoke" key (handled in the string switch above); V2 JSON
+	// Delete flag normalization: V1 query/form values land under the
+	// lowercase "delete" key (handled in the string switch above); V2 JSON
 	// keeps the original casing and may use a bool, number or string.
-	// Collapse any casing into the internal "_revoke" marker (truthy only,
-	// so a falsey flag never leaves a stray key in the APNs payload) and
-	// drop the raw key so it is never forwarded as a custom payload field.
+	// Collapse any casing into the canonical "delete" key holding "1" when
+	// truthy, and drop the raw key otherwise, so the APNs custom payload
+	// only ever carries the literal "1" the Bark app matches on, and
+	// IsDelete() sees a consistent value for the short-circuit below.
 	for k, v := range msg.ExtParams {
-		if strings.ToLower(k) != "revoke" {
+		if strings.ToLower(k) != "delete" {
 			continue
 		}
 		delete(msg.ExtParams, k)
 		if isTruthyFlag(v) {
-			msg.ExtParams["_revoke"] = true
+			msg.ExtParams["delete"] = "1"
 		}
 	}
 	if msg.DeviceKey == "" {
@@ -620,14 +612,15 @@ func push(rid string, params map[string]interface{}) (int, error) {
 		return 400, fmt.Errorf("device key is empty")
 	}
 
-	// HarmonyOS notification withdrawal: a truthy `revoke` flag reroutes
-	// the whole request into pushRevoke() (v1 messages:revoke). Only
-	// device_key + id (notifyId) are meaningful there; every other push
-	// parameter is ignored by design. Revoke is HarmonyOS-only — APNs has
-	// no remote notification withdrawal API — and does not publish to the
-	// monitoring stream since nothing is delivered.
-	if _, revoke := msg.ExtParams["_revoke"]; revoke {
-		return pushRevoke(rid, &msg)
+	// Bark-compatible `delete` withdrawal: a truthy flag reroutes the whole
+	// request into pushDelete() — HarmonyOS targets go through the Huawei
+	// v1 messages:revoke API, iOS targets receive the standard Bark silent
+	// push so the Bark app removes the notification. Only device_key + id
+	// (the original notifyId / Bark id) are meaningful; every other push
+	// parameter is ignored by design and nothing is published to the
+	// monitoring stream since no notification is delivered.
+	if msg.IsDelete() {
+		return pushDelete(rid, &msg)
 	}
 
 	if msg.IsEmptyAlert() {
@@ -916,53 +909,113 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	return 200, nil
 }
 
-// pushRevoke withdraws a previously delivered HarmonyOS notification.
+// pushDelete withdraws a previously delivered notification identified by
+// `id` on every platform bound to the device_key: HarmonyOS targets go
+// through the Huawei v1 messages:revoke API, iOS targets receive the
+// standard Bark silent push (ContentAvailable) so the Bark app removes the
+// notification from the notification center and its local history (needs
+// Background App Refresh enabled).
 //
-// Reached from push() when the request carries a truthy `revoke` flag;
-// the Bark `id` param is used as notifyId and must have been sent with
-// the original push (an auto-generated id cannot be referenced later).
-// Revoke is HarmonyOS-only — APNs provides no remote notification
-// withdrawal API — so only harmony records under the device_key are
-// targeted (an explicit platform=ios narrows to none → 400). Every
-// other push parameter (title/body/sound/...) is ignored, and no
-// monitoring-stream entry is published since nothing is delivered.
-func pushRevoke(rid string, msg *apns.PushMessage) (int, error) {
+// Reached from push() when the request carries a truthy `delete` flag;
+// the Bark `id` param is mandatory — both the Huawei revoke API and the
+// Bark app locate the notification to remove by it, and it must have been
+// sent with the original push (an auto-generated id cannot be referenced
+// later). Every other push parameter (title/body/sound/...) is ignored,
+// and no monitoring-stream entry is published since no notification is
+// delivered. An explicit `platform` narrows the target set; a key with no
+// remaining target at all is rejected with 400.
+func pushDelete(rid string, msg *apns.PushMessage) (int, error) {
 	maskedKey := logging.MaskMiddle(msg.DeviceKey)
 
 	devices, err := db.DevicesByKey(msg.DeviceKey)
 	if err != nil {
 		if _, probe := wellKnownProbeKeys[msg.DeviceKey]; probe {
-			logger.Infof("[Push] rid=%s revoke probe path rejected: device_key=%s", rid, maskedKey)
+			logger.Infof("[Push] rid=%s delete probe path rejected: device_key=%s", rid, maskedKey)
 			return 404, fmt.Errorf("device not found")
 		}
-		logger.Errorf("[Push] rid=%s revoke device not found: device_key=%s err=%v", rid, maskedKey, err)
+		logger.Errorf("[Push] rid=%s delete device not found: device_key=%s err=%v", rid, maskedKey, err)
 		return 400, fmt.Errorf("failed to get device info: %v", err)
 	}
 
-	// Revoke only targets harmony tokens; APNs has no remote withdrawal.
-	// platform=ios explicitly narrows to nothing → 400 below.
+	// The Bark app and the Huawei revoke API both need the positive numeric
+	// id carried by the original push to locate the notification.
+	if notifyId, err := toInt(msg.Id); err != nil || notifyId <= 0 {
+		logger.Warnf("[Push] rid=%s delete requires a numeric positive id: device_key=%s id=%q", rid, maskedKey, msg.Id)
+		return 400, fmt.Errorf("delete requires a numeric positive id")
+	}
+
 	explicitPlatform, _ := msg.ExtParams["_platform"].(string)
-	tokens := make([]string, 0, len(devices))
+	var harmonyTokens []string
+	var iosTargets []*database.DeviceInfo
 	for _, di := range devices {
-		if di.Platform != "harmony" || di.Token == "" {
+		if di.Token == "" {
 			continue
 		}
 		if explicitPlatform != "" && di.Platform != explicitPlatform {
 			continue
 		}
-		tokens = append(tokens, di.Token)
+		switch di.Platform {
+		case "harmony":
+			harmonyTokens = append(harmonyTokens, di.Token)
+		case "ios":
+			iosTargets = append(iosTargets, di)
+		}
 	}
-	if len(tokens) == 0 {
-		logger.Warnf("[Push] rid=%s revoke no harmony target: device_key=%s explicit=%s", rid, maskedKey, explicitPlatform)
-		return 400, fmt.Errorf("no valid harmony device token for key %s", msg.DeviceKey)
+	if len(harmonyTokens) == 0 && len(iosTargets) == 0 {
+		logger.Warnf("[Push] rid=%s delete no target: device_key=%s explicit=%s", rid, maskedKey, explicitPlatform)
+		return 400, fmt.Errorf("no valid device token for key %s", msg.DeviceKey)
 	}
+
+	// Withdraw on every available channel; succeed if any one succeeds and
+	// surface the last failure code only when all of them failed.
+	successCount := 0
+	var lastCode int
+	var lastErr error
+	if len(harmonyTokens) > 0 {
+		code, err := revokeHarmonyTokens(rid, msg, harmonyTokens)
+		if err != nil {
+			lastCode, lastErr = code, err
+		} else {
+			successCount++
+		}
+	}
+	for _, di := range iosTargets {
+		// Shallow-copy per target so the DeviceToken log field does not
+		// alias the shared message struct (same pattern as pushToDevice).
+		m := *msg
+		m.DeviceToken = di.Token
+		code, err := pushToAPNs(rid, di, &m)
+		if err != nil {
+			lastCode, lastErr = code, err
+		} else {
+			successCount++
+		}
+	}
+	if successCount > 0 {
+		logger.Infof("[Push] rid=%s delete ok: device_key=%s harmonyTargets=%d iosTargets=%d",
+			rid, maskedKey, len(harmonyTokens), len(iosTargets))
+		return 200, nil
+	}
+	if lastErr != nil {
+		return lastCode, lastErr
+	}
+	return 500, fmt.Errorf("all deletes failed for key %s", msg.DeviceKey)
+}
+
+// revokeHarmonyTokens withdraws previously delivered HarmonyOS notifications
+// by notifyId (the Bark `id` of the original push) on the given harmony
+// tokens. Called from pushDelete for the HarmonyOS targets of a `delete`
+// request. An 80200001 (invalid token) response clears the stored harmony
+// token, mirroring the push path's dead-token cleanup.
+func revokeHarmonyTokens(rid string, msg *apns.PushMessage, tokens []string) (int, error) {
+	maskedKey := logging.MaskMiddle(msg.DeviceKey)
 
 	// notifyId is required and must be the positive numeric id carried by
 	// the original push (Bark `id` → V3 notification.notifyId).
 	notifyId, err := toInt(msg.Id)
 	if err != nil || notifyId <= 0 {
-		logger.Warnf("[Push] rid=%s revoke requires a numeric positive id: device_key=%s id=%q", rid, maskedKey, msg.Id)
-		return 400, fmt.Errorf("revoke requires a numeric positive id")
+		logger.Warnf("[Push] rid=%s delete requires a numeric positive id: device_key=%s id=%q", rid, maskedKey, msg.Id)
+		return 400, fmt.Errorf("delete requires a numeric positive id")
 	}
 
 	initHarmony()
