@@ -44,7 +44,7 @@ HarmonyOS 推送流程:
     )
     ```
 
-   如需使用鸿蒙通知撤回（`revoke`），还要填入应用级 `clientID`（AGC「项目设置 → 常规 → 应用信息」中的 OAuth 2.0 Client ID，值等于 APP ID）；它不影响普通发送。
+   如需使用鸿蒙通知删除（`delete`），还要填入应用级 `clientID`（AGC「项目设置 → 常规 → 应用信息」中的 OAuth 2.0 Client ID，值等于 APP ID）；它不影响普通发送。
 
 6. 重启服务，日志中应看到 `HarmonyOS push client initialized`
 

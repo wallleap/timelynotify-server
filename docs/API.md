@@ -13,9 +13,9 @@ TimelyNotify Server HTTP API 参考。兼容上游 Bark V1（URL 路径参数推
   - [POST /push（V2 单设备推送）](#post-pushv2-单设备推送)
   - [POST /push（V2 批量推送）](#post-pushv2-批量推送)
   - [V1 兼容推送（路径参数）](#v1-兼容推送路径参数)
-  - [Push 其它字段参考](#push-其它字段参考)
+  - [Push 字段参考](#push-字段参考)
   - [多平台扇出](#多平台扇出)
-  - [通知撤回（仅鸿蒙）](#通知撤回仅鸿蒙)
+  - [通知删除（delete，Bark 兼容）](#通知删除deletebark-兼容)
   - [参数优先级](#参数优先级)
   - [HarmonyOS 推送](#harmonyos-推送)
 - [设备注册](#设备注册)
@@ -168,7 +168,7 @@ curl -H "Authorization: Basic YWRtaW46c2VjcmV0" "http://127.0.0.1:18080/info"
 | title          | string                                     | 否   | 通知标题（字体比正文大），为空时，鸿蒙端自动填 `"订阅通知"`、iOS 端自动填 `"Bark"` |
 | subtitle       | string                                     | 否   | 通知副标题，设置了 `subtitle` 之后 `title` 和 `body` 必填    |
 | platform       | string                                     | 否   | 收窄到指定平台：`ios` 或 `harmony`。省略则扇出到所有有效平台 |
-| 其他 Push 字段 | 见 [Push 其它字段参考](#push-其它字段参考) | 否   | level/sound/badge/icon/url 等                                |
+| 其他 Push 字段 | 见 [Push 字段参考](#push-字段参考) | 否   | level/sound/badge/icon/url 等                |
 
 \* 单设备推送必填 `device_key`，批量推送改用 `device_keys`。
 
@@ -213,7 +213,7 @@ curl -X POST "http://127.0.0.1:18080/push" \
 | 字段           | 类型                                       | 必填 | 说明                           |
 | -------------- | ------------------------------------------ | ---- | ------------------------------ |
 | device\_keys   | string\[] 或逗号分隔字符串                 | 是   | 目标设备 key 列表              |
-| 其他 Push 字段 | 见 [Push 其它字段参考](#push-其它字段参考) | 否   | 公共参数，对每个设备都推送一份 |
+| 其他 Push 字段 | 见 [Push 字段参考](#push-字段参考) | 否   | 公共参数，对每个设备都推送一份 |
 
 ```sh
 curl -X POST "http://127.0.0.1:18080/push" \
@@ -264,38 +264,79 @@ curl -X POST "http://127.0.0.1:18080/ynJ5Ft4atkMkWeo2PAvFhF/hello?sound=minuet&g
 
 **响应**：同 [V2 单设备推送](#post-pushv2-单设备推送)。
 
-### Push 其它字段参考
+### Push 字段参考
 
-前面已提及的 `device_key`、`title`、`subtitle`、`body`，`device_keys` 不再重复
+V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 官方分类组织：
 
-V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
+#### 内容
 
-| 字段           | 类型       | iOS                                                          | HarmonyOS                                                    |
-| -------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| id             | string / integer | 使用相同的 ID 值时，将更新对应推送的通知内容<br/>需 Bark v1.5.2、bark-server v2.2.5 以上；V2 JSON 可传字符串或整数，服务端会保留整数的精确十进制形式<br/>传 `id` 时监控流（`/:device_key/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `revoke` 撤回模式的目标 notifyId（见 [通知撤回](#通知撤回仅鸿蒙)） |
-| revoke         | bool/string | -                                                           | 真值（JSON `true`/非零数字，query 的 `1`/`true`/`yes`/`on` 或裸 `?revoke`）进入**撤回模式**：用 `id`（原通知 notifyId，须正整数）撤回该 key 下鸿蒙设备上尚未点击/未下发的通知，调用华为 v1 `messages:revoke`；忽略其它所有推送参数、不写监控流；仅鸿蒙生效（iOS 无远程撤回 API），无鸿蒙记录返回 400；需在 `harmony/harmony_certs.go` 配置应用级 `clientID`，详见 [通知撤回](#通知撤回仅鸿蒙) |
-| level          | string     | APNs 优先级：`critical`/`active`/`timeSensitive`/`passive`   | -                                                            |
-| volume         | string     | critical 通知铃声音量                                        | -                                                            |
-| badge          | integer    | App 图标角标数，值为 `0` 时清除角标                          | 同 iOS                                                       |
-| call           | string     | `1` 时铃声持续播放 30 秒                                     | -                                                            |
-| autoCopy       | string     | `1` 时自动复制                                               | `1` 时客户端同步到新通知后自动复制最新一条到剪贴板并 Toast 提示：仅非首次历史同步才触发、通知产生 5 分钟内有效、同一轮多条只取时间最新的一条（时间相同取 id 最大），避免打开 App 时积压的旧验证码覆盖剪贴板；首轮其余消息可在通知详情手动复制。**后台不触发**：App 在后台被系统冻结/未启动时，无法拉取消息并执行复制，需用户切回前台（或点系统通知跳进 App）才会触发；要实现"推送到达即复制"需 Push Kit `push-type: 2` 扩展通知权益，普通应用暂申请不到 |
-| copy           | string     | 待复制的文本                                                 | 详情页 action 区在最左侧显示"复制"按钮（仅 copy 时独占整行，与 url 并存时三项等宽）；autoCopy 触发时优先复制此字段，为空则回退复制 body；可放入加密载荷 |
-| sound          | string     | 铃声名（自动补 `.caf` 后缀），见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds) | 铃声名与 Bark 一致，自动补 `.mp3` 后缀（已带 `.mp3`/`.wav`/`.mpeg` 后缀则保持不变，`.caf` 自动转 `.mp3`）；铃声文件需放在应用 `/resources/rawfile` 目录，且需在 AGC 申请「自定义铃声权益」，`category=MARKETING` 时自定义铃声无效 |
-| soundDuration  | integer    | -                                                            | 通知铃声时长（单位秒），仅同时传了 `sound` 才生效，取值范围 `[1, 60]`（超出自动截断为 60），铃声不足该时长会循环播放；不传时铃声超过 30 秒截断 |
-| icon           | string     | 图标 URL（iOS 15+）                                          | 通知图 URL，优先映射到华为 `notification.image`；客户端列表/详情作为左侧图标显示 |
-| image          | string     | 图片 URL（iOS 15+）                                          | `icon` 为空时回退映射到华为 `notification.image`；客户端列表作为右侧缩略图、详情作为正文大图显示。华为会自动校验图片，要求 HTTPS，支持 PNG/JPG/JPEG/BMP/WEBP，总字节数不超过 192KB |
-| group          | string     | 通知分组                                                     |                                                              |
-| ciphertext     | string     | 加密推送的 Base64 密文                                       | 使用普通 `push-type: 0` 发送安全占位通知；归档与非归档使用不同提示文案，服务端不解密 |
-| iv             | string     | 发送端逐条生成的 IV；ECB 可省略                              | 保存在消息历史中，供 Harmony 客户端打开后本地解密             |
-| markdown       | string     | Markdown 正文，覆盖 `body`                                   |                                                              |
-| isArchive      | string     | `1` 或省略时由 App 归档；显式传其它值时不归档                | 同 iOS；未归档的普通通知不写历史。未归档的加密通知会暂存至客户端成功同步并删除远端，不在本地保留 |
-| ttl            | integer    | 归档消息存活秒数，过期自动删除                               | 同 iOS；正整数秒数随历史同步到客户端，客户端按推送时间计算过期时间并清理本地记录 |
-| url            | string     | 点击通知跳转的 URL                                           | 写入 `notification.clickAction.data.url`；若同时传 `data`，会保留其中其它键，且此字段覆盖 `data.url` |
-| action         | string     | 传 "alert" 时，点击推送跳转到APP时会弹出操作弹窗             | 目前固定点击跳转应用首页                                     |
-| delete         | string     | `1` 时静默推送（不展示，ContentAvailable）                   | -                                                            |
-| foregroundShow | `string`   | -                                                            | 默认 `1`，应用在前后台都展示通知消息，其它值应用在前台时不通知 |
-| inboxContent   | `string[]` | -                                                            | 多行消息（传了替换 `body`）：例<br />`"inboxContent": ["1. 通知栏消息样式", "2. 通知栏消息提醒方式和展示方式", "3. 通知栏消息语言本地化"]`；传该字段时自动携带 `style=3`（收件箱样式），无需单独传 `style` |
-| data           | `string`   | -                                                            | 自定义数据载荷                                               |
+| 字段     | 类型   | iOS                                                          | HarmonyOS |
+| -------- | ------ | ------------------------------------------------------------ | --------- |
+| title    | string | 推送标题，显示在通知卡片的第一行；不传时通知只显示正文，服务端自动填 `"Bark"` | 同 iOS，服务端自动填 `"订阅通知"` |
+| subtitle | string | 推送副标题，显示在标题下方、正文上方的较小字号位置，适合放来源、状态之类的补充信息；不传则不显示这一行。设置了 `subtitle` 之后 `title` 和 `body` 必填 | 同 iOS（但系统通知卡片不会显示，仅在 App 里显示） |
+| body     | string | 推送正文，通知卡片上的主要内容；全空时服务端自动填 `"Empty Message"` | 同 iOS |
+| markdown | string | Markdown 正文，传了这个参数会忽略 `body`；支持加粗、斜体、删除线、链接、行内代码、代码块、1-6 级标题、引用、有序/无序列表、任务列表，图片在通知里降级为链接文本；发送时注意处理内容中的特殊字符 |      -     |
+
+#### 设备
+
+| 字段        | 类型             | 说明                                                         |
+| ----------- | ---------------- | ------------------------------------------------------------ |
+| device_key  | string           | 推送目标设备的 key，作用和 URL 路径里的 key 一样；V2 JSON 且路径为 `/push` 时放在请求体中，与 `device_keys` 二选一 |
+| device_keys | string\[]        | key 数组，一次推送给多台设备，仅支持 JSON 请求；批量上限由 `--max-batch-push-count` 控制（默认 `-1` 无限） |
+
+#### 展示与分组
+
+| 字段  | 类型    | iOS                                                          | HarmonyOS                                                    |
+| ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| group | string  | 对消息分组，同一个 `group` 的推送在系统通知中心和历史记录里归到一组；可在 App 历史消息列表按分组查看，长按或下拉系统通知横幅可对分组静音，静音期间该分组的推送不亮屏提醒 |    系统通知中心不支持分组，仅在 App 里显示分组    |
+| icon  | string  | 自定义通知图标，填图片 URL，设置后替换通知里默认的 Bark 图标；图标自动缓存在本机，同一 URL 只下载一次，之后即使图片地址不可用也能正常显示，首次下载超过 10 秒会退回默认图标；需 iOS 15+ | 通知图 URL，会在通知卡片右侧显示（如果华为后期开放可能放到左侧图标右下角），客户端列表/详情作为左侧图标显示 |
+| image | string  | 推送图片的 URL，收到推送后展开通知即可看到大图，App 历史记录里也会显示；图片自动缓存在本机，下载超过 10 秒时这条推送不带图片显示 | `icon` 为空时，显示到通知卡片右侧，客户端列表作为右侧缩略图、详情作为正文大图显示。华为会自动校验图片，要求 HTTPS，支持 PNG/JPG/JPEG/BMP/WEBP，总字节数不超过 192KB |
+| badge | integer | App 图标角标数，直接设置成传入的值，不会在原有数字上累加；传 `0` 会清除角标，同时清掉通知中心里该 App 的通知 | 可改 App 图标右上角数字，传 `0` 清除角标          |
+
+#### 提醒与铃声
+
+| 字段   | 类型    | iOS                                                          | HarmonyOS                                                    |
+| ------ | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| level  | string  | 推送级别：`active`（默认，立即亮屏显示）/`timeSensitive`（时效性通知，专注模式下也能显示）/`passive`（仅加入通知列表，不亮屏提醒）/`critical`（重要警告，静音模式下也响铃）；`critical` 需在 App 内授权「重要警告」，未授权时降级为普通通知，铃声音量由 `volume` 控制。需 iOS 15+ | -          |
+| volume | string  | 重要警告（`level=critical`）的通知音量，取值范围 0-10，不传默认 5；只在重要警告时生效，普通推送的音量由系统控制，不受这个参数影响 | -        |
+| call   | string  | 传 `"1"` 时把通知铃声循环播放 30 秒（默认只响一次），用于强提醒场景；配合 `sound` 指定铃声，与 `level=critical` 一起用时可用 `volume` 调整音量 | -                                                            |
+| sound  | string  | 推送使用的铃声名称，例如 `minuet`（自动补 `.caf` 后缀）；App 内置铃声和自己导入的铃声都可用，导入铃声需 `.caf` 格式、不超过 30 秒，在 App 内铃声设置导入；不传时使用 App 设置里的默认铃声，名称不存在时回退默认提示音；内置铃声列表见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds) | 铃声名与 Bark 一致，自动补 `.mp3` 后缀 |
+
+#### 复制与跳转
+
+| 字段   | 类型   | iOS                                                          | HarmonyOS                                                    |
+| ------ | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| copy   | string | 指定复制推送时复制的内容，比如只复制正文里的验证码；不传这个参数时，复制到的是推送正文 | 详情页 action 区在最左侧显示"复制"按钮（仅 copy 时独占整行，与 url 并存时三项等宽）；autoCopy 触发时优先复制此字段，为空则回退复制 body；可放入加密载荷 |
+| url    | string | 点击推送时跳转的 URL，支持 URL Scheme 和 Universal Link；`http`/`https` 链接优先用 Universal Link 打开，失败时用 Safari，其他 Scheme 直接交给系统处理 | 点击跳转到指定 URL |
+| action | string | 传 `alert` 时，点击推送打开 App 会弹出操作弹窗，可复制推送内容或分享；传 `none` 时只打开 App，不跳转到具体页面，其他值按默认行为处理；同时传了 `url` 时优先按 `url` 跳转 | 目前固定点击跳转应用首页                                     |
+
+#### 加密
+
+| 字段       | 类型   | iOS                                                          | HarmonyOS                                                    |
+| ---------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| ciphertext | string | 加密推送的 Base64 密文：推送内容对 Bark 服务器和苹果 APNs 都不可见，只有本机 App 能解密；密文里可放 `title`、`subtitle`、`body`、`sound`、`group`、`badge` 等参数（加密方法见 [推送加密](https://bark.day.app/#/encryption)）；解密失败时通知内容显示 `Decryption Failed` | 通知卡片显示安全占位通知；归档与非归档使用不同提示文案，服务端不解密；App 中能看到解密信息 |
+| iv         | string | 加密时使用的随机 IV 值，需一并传给服务器；ECB 可省略 | 同 iOS            |
+
+#### 保存与管理
+
+| 字段      | 类型             | iOS                                                          | HarmonyOS                                                    |
+| --------- | ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| id        | string / integer | 通知唯一标识：使用相同的 `id` 时，新推送会**更新替换**原通知（不重复堆叠，适合进度/状态类）；`delete` 删除通知也靠它定位<br/>需 Bark v1.5.2、bark-server v2.2.5 以上；官方 App 要求 JSON 传参使用字符串，本服务端会把数字 id 归一化为字符串下发，故 V2 JSON 传字符串或整数均生效，服务端保留整数的精确十进制形式<br/>传 `id` 时监控流（`/:device_key/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `delete` 删除模式的目标 notifyId（见 [通知删除](#通知删除deletebark-兼容)） |
+| isArchive | string           | 是否把这条推送保存到 App 的历史记录：传 `1` 保存，传其他值不保存；不传时按 App 内的设置决定，默认为保存 | 同 iOS；未归档的普通通知不写历史。未归档的加密通知会暂存至客户端成功同步并删除远端，不在本地保留 |
+| ttl       | integer          | 已保存推送的有效期（秒），只对保存到历史记录的消息生效；到期后 App 自动删除这条历史记录，同时移除通知中心里对应的推送；适合只在一段时间内有意义的消息，比如验证码、临时告警 | 同 iOS；正整数秒数随历史同步到客户端，客户端按推送时间计算过期时间并清理本地记录 |
+| delete    | string           | 传 `"1"` 时**删除指定通知**：同时从系统通知中心和 Bark App 历史记录里移除，需搭配 `id` 使用；指令经静默推送（ContentAvailable）下发，需在系统设置里为 Bark 开启「后台 App 刷新」，否则无效 | 真值时**删除**相同 `id` 的通知（华为 v1 `messages:revoke`，需正整数 `id`）；短路整条推送链路——忽略其它所有参数、不写监控流。见 [通知删除](#通知删除deletebark-兼容) |
+
+#### 扩展字段
+
+跨平台自有能力与 HarmonyOS 特有字段，不在 Bark 官方参数目录中：
+
+| 字段           | 类型      | iOS            | HarmonyOS                                                    |
+| -------------- | --------- | -------------- | ------------------------------------------------------------ |
+| autoCopy       | string    | `1` 时自动复制 | `1` 时客户端同步到新通知后自动复制最新一条到剪贴板并 Toast 提示：仅非首次历史同步才触发、通知产生 5 分钟内有效、同一轮多条只取时间最新的一条（时间相同取 id 最大），避免打开 App 时积压的旧验证码覆盖剪贴板；首轮其余消息可在通知详情手动复制。**后台不触发**：App 在后台被系统冻结/未启动时，无法拉取消息并执行复制，需用户切回前台（或点系统通知跳进 App）才会触发；要实现"推送到达即复制"需 Push Kit `push-type: 2` 扩展通知权益，普通应用暂申请不到 |
+| soundDuration  | integer   | -              | 通知铃声时长（单位秒），仅同时传了 `sound` 才生效，取值范围 `[1, 60]`（超出自动截断为 60），铃声不足该时长会循环播放；不传时铃声超过 30 秒截断 |
+| foregroundShow | `string`  | -              | 默认 `1`，应用在前后台都展示通知消息，其它值应用在前台时不通知 |
+| inboxContent   | `string[]`| -              | 多行消息（传了替换 `body`）：例<br />`"inboxContent": ["1. 通知栏消息样式", "2. 通知栏消息提醒方式和展示方式", "3. 通知栏消息语言本地化"]`；传该字段时自动携带 `style=3`（收件箱样式），无需单独传 `style` |
+| data           | `string`  | -              | 自定义数据载荷                                               |
 
 > 表外字段原样透传为 APNs 自定义字段（`payload.custom`），key 转小写。
 
@@ -325,28 +366,29 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名）：
 
 **收窄到指定平台**：在推送体里带 `"platform": "ios"` 或 `"platform": "harmony"`，仅推该平台记录。`platform` 是**收窄**而非覆盖——只选择投递哪些已绑定记录，不会改写存储的平台字段。
 
-### 通知撤回（仅鸿蒙）
+### 通知删除（delete，Bark 兼容）
 
-推送请求带真值 `revoke` 参数时，**不发送新通知**，而是撤回之前用相同 `id`（华为 notifyId）发出、**尚未下发到端侧或已展示但未点击**的通知（华为 v1 `messages:revoke` 接口）：
+推送请求带真值 `delete` 参数时，**不发送新通知**，而是删除之前用相同 `id` 发出的通知（Bark 标准语义，需搭配 `id` 使用）。删除**短路整条推送链路**：忽略其它所有推送参数（title/body/sound/…），且**不写 gotify 监控流**：
 
 ```sh
-# V2 JSON
+# V2 JSON（"delete":1 / "delete":true / "delete":"1" 均可）
 curl -X POST http://127.0.0.1:18080/push -H 'Content-Type: application/json' \
-  -d '{"device_key":"<your key>","revoke":true,"id":12345}'
+  -d '{"device_key":"<your key>","delete":1,"id":12345}'
 
-# V1 兼容路径（裸 ?revoke、revoke=1、revoke=true 均视为真）
-curl "http://127.0.0.1:18080/<your key>?revoke=1&id=12345"
+# V1 兼容路径（裸 ?delete、delete=1、delete=true 均视为真）
+curl "http://127.0.0.1:18080/<your key>?delete=1&id=12345"
 ```
 
 约定：
 
-- **`id` 必填且必须是正整数**——即原推送携带的 `id`（V3 notifyId）；原推送未带 `id` 则无法撤回。缺失、非数字或非正数返回 400；
-- **仅鸿蒙设备生效**（APNs 无远程通知撤回 API）；该 key 下无鸿蒙记录、或 `platform=ios` 收窄后无鸿蒙目标时返回 400；
-- 真值时**忽略其它所有推送参数**（title/body/sound/…），且**不写 gotify 监控流**（没有消息投递）；
-- 撤回端点为华为 v1 `messages:revoke`，URL 中的应用级 **Client ID** 与发送端点（v3 `projectId`）不同，需在 `harmony/harmony_certs.go` 的 `clientID` 配置：取 AGC「项目设置 → 常规 → 应用信息 → **OAuth 2.0客户端ID(凭据)-Client ID**」（值等于 APP ID）。**注意不要填成项目级 Client ID**（即 `agconnect-services.json` 顶层 `client.client_id`，两种 ID 同页并存）——填成项目级会报 `80300002 No permission to send message to these tmIDs`；未配置时撤回请求快速报错，正常推送不受影响；
-- 撤回请求体为扁平结构 `{"notifyId": <id>, "token": [...]}`，`push-type: 0`；失败时 80200001/80300007 视为失效 token，按平台定向清理鸿蒙记录；
-- 批量推送与 MCP 接口同样支持 `revoke` 参数（走同一条 `push()` 链路）；
-- **端侧生效条件**：华为返回 `80000000` 只代表 Push 服务端**受理**撤回请求，通知是否真正从通知栏移除取决于设备能力——支持 **Phone/Tablet/PC（HarmonyOS NEXT 5.1 及以上）**、Wearable（5.1.0(18)+）、TV（5.1.1(19)+）的**真机**；**DevEco 模拟器（emulator）不处理已展示通知的撤回指令**（API 照样返回成功，但通知保留；未下发/未展示的消息在模拟器上可拦下）。因此模拟器上「撤回成功但通知还在」是平台限制，不是服务端问题，验证已展示消息撤回请用真机；最可靠的用法是发错后**尽快撤回**（趁消息未展示）。
+- **`id` 必填且必须是正整数**——即原推送携带的 `id`（V3 notifyId / Bark id）；原推送未带 `id` 则无法定位要删除的通知。缺失、非数字或非正数返回 400；
+- **鸿蒙目标**：调用华为 v1 `messages:revoke` 撤回相同 `id`（华为 notifyId）的通知——**尚未下发到端侧或已展示但未点击**的通知会被移除；
+- **iOS 目标**：Bark 原生行为——经静默推送（ContentAvailable）下发，Bark App 删除相同 `id` 的通知（**同时移除系统通知中心与 App 历史记录**）；需在系统设置里为 Bark 开启「后台 App 刷新」，否则无效；
+- 同一 key 同时绑定 iOS 与鸿蒙时，一次 `delete=1` 两端同时删除；**任一平台成功即返回 200**，全部失败才 500；该 key 下无任何有效目标（含 `platform` 收窄后无目标）时返回 400；
+- 鸿蒙撤回端点为华为 v1 `messages:revoke`，URL 中的应用级 **Client ID** 与发送端点（v3 `projectId`）不同，需在 `harmony/harmony_certs.go` 的 `clientID` 配置：取 AGC「项目设置 → 常规 → 应用信息 → **OAuth 2.0客户端ID(凭据)-Client ID**」（值等于 APP ID）。**注意不要填成项目级 Client ID**（即 `agconnect-services.json` 顶层 `client.client_id`，两种 ID 同页并存）——填成项目级会报 `80300002 No permission to send message to these tmIDs`；未配置时鸿蒙删除请求快速报错（iOS 静默推送不受影响），正常推送不受影响；
+- 鸿蒙撤回请求体为扁平结构 `{"notifyId": <id>, "token": [...]}`，`push-type: 0`；失败时 80200001/80300007 视为失效 token，按平台定向清理鸿蒙记录；
+- 批量推送与 MCP 接口同样支持 `delete` 参数（走同一条 `push()` 链路）；
+- **端侧生效条件**：华为返回 `80000000` 只代表 Push 服务端**受理**删除请求，通知是否真正从通知栏移除取决于设备能力——支持 **Phone/Tablet/PC（HarmonyOS NEXT 5.1 及以上）**、Wearable（5.1.0(18)+）、TV（5.1.1(19)+）的**真机**；**DevEco 模拟器（emulator）不处理已展示通知的删除指令**（API 照样返回成功，但通知保留；未下发/未展示的消息在模拟器上可拦下）。因此模拟器上「删除成功但通知还在」是平台限制，不是服务端问题，验证已展示消息删除请用真机；最可靠的用法是发错后**尽快删除**（趁消息未展示）。
 
 ### 参数优先级
 
