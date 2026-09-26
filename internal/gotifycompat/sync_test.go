@@ -643,6 +643,102 @@ func TestParseCursor(t *testing.T) {
 	}
 }
 
+// TestDeleteByExtraID covers explicit extras.id deletion (the pushDelete
+// path): a matching message is removed with a kind=1 tombstone, a
+// DeletionByExtraID record is always appended (even when no message
+// matched), and the envelope projects it as extraIds (int64) coexisting
+// with ids/purges. Runs against both the bbolt and the memory store.
+func TestDeleteByExtraID(t *testing.T) {
+	for _, svc := range []*Service{buildTestService(t, ""), buildMemoryFallbackService(t)} {
+		pub := func(device, extraID string) {
+			t.Helper()
+			if err := svc.Publish("t", "b", 0, map[string]interface{}{"device_key": device, "id": extraID}); err != nil {
+				t.Fatalf("Publish(%s, id=%s): %v", device, extraID, err)
+			}
+		}
+		pub("d1", "7") // id 1
+		pub("d1", "8") // id 2
+		pub("d2", "7") // id 3 — same extras.id, another device: untouched
+
+		// Anchor event so the client's baseline cursor is non-zero.
+		publishDevice(t, svc, "d1", 1) // id 4
+		if ok, err := svc.DeleteMessageByDevice("d1", 4); err != nil || !ok {
+			t.Fatalf("anchor delete d1/4: ok=%v err=%v", ok, err)
+		}
+		base, err := svc.DeletionsByDevice("d1", 0)
+		if err != nil || base.Cursor == 0 {
+			t.Fatalf("baseline cursor: %+v err=%v", base, err)
+		}
+		if len(base.ExtraIDs) != 0 {
+			t.Fatalf("baseline must not leak extraIds: %+v", base)
+		}
+
+		// Found: message removed, kind=1 tombstone + kind=4 record.
+		removed, err := svc.DeleteMessageByExtraID("d1", "7")
+		if err != nil || !removed {
+			t.Fatalf("DeleteMessageByExtraID(d1, 7): removed=%v err=%v", removed, err)
+		}
+		msgs, _ := svc.MessagesByDevice("d1", 100, 0)
+		if len(msgs) != 1 || msgs[0].ID != 2 {
+			t.Fatalf("d1 should keep only id 2, got %+v", msgs)
+		}
+		page, err := svc.DeletionsByDevice("d1", base.Cursor)
+		if err != nil {
+			t.Fatalf("deletions page: %v", err)
+		}
+		if len(page.IDs) != 1 || page.IDs[0] != 1 {
+			t.Fatalf("want kind=1 ids [1], got %v", page.IDs)
+		}
+		if len(page.ExtraIDs) != 1 || page.ExtraIDs[0] != 7 {
+			t.Fatalf("want extraIds [7], got %v", page.ExtraIDs)
+		}
+		if len(page.Purges) != 0 || page.Reset || page.HasMore {
+			t.Fatalf("unexpected page flags: %+v", page)
+		}
+
+		// Not found: no message removed, but the extras.id record still lands.
+		removed, err = svc.DeleteMessageByExtraID("d1", "99")
+		if err != nil || removed {
+			t.Fatalf("DeleteMessageByExtraID(d1, 99): removed=%v err=%v", removed, err)
+		}
+		page2, err := svc.DeletionsByDevice("d1", page.Cursor)
+		if err != nil {
+			t.Fatalf("deletions page2: %v", err)
+		}
+		if len(page2.ExtraIDs) != 1 || page2.ExtraIDs[0] != 99 {
+			t.Fatalf("want extraIds [99], got %v", page2.ExtraIDs)
+		}
+		if len(page2.IDs) != 0 {
+			t.Fatalf("a missing extras.id must not write kind=1 ids, got %v", page2.IDs)
+		}
+
+		// extraIds coexist with purges on the same page.
+		if err := svc.DeleteAllMessagesByDevice("d1"); err != nil {
+			t.Fatalf("purge d1: %v", err)
+		}
+		page3, err := svc.DeletionsByDevice("d1", page2.Cursor)
+		if err != nil {
+			t.Fatalf("deletions page3: %v", err)
+		}
+		if len(page3.Purges) != 1 || page3.Purges[0] != 2 {
+			t.Fatalf("want purge ceiling [2], got %v", page3.Purges)
+		}
+		if len(page3.ExtraIDs) != 0 {
+			t.Fatalf("purge page must not replay extraIds, got %v", page3.ExtraIDs)
+		}
+
+		// d2's message with the same extras.id is untouched and its log is clean.
+		d2msgs, _ := svc.MessagesByDevice("d2", 100, 0)
+		if len(d2msgs) != 1 {
+			t.Fatalf("d2 message must survive, got %+v", d2msgs)
+		}
+		d2page, err := svc.DeletionsByDevice("d2", 0)
+		if err != nil || d2page.Cursor != 0 || len(d2page.ExtraIDs) != 0 {
+			t.Fatalf("device leak into d2: %+v err=%v", d2page, err)
+		}
+	}
+}
+
 func newSvc(t *testing.T, cfg Config) *Service {
 	t.Helper()
 	svc, err := Init(cfg)

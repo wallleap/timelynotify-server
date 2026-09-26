@@ -922,8 +922,12 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 // sent with the original push (an auto-generated id cannot be referenced
 // later). Every other push parameter (title/body/sound/...) is ignored,
 // and no monitoring-stream entry is published since no notification is
-// delivered. An explicit `platform` narrows the target set; a key with no
-// remaining target at all is rejected with 400.
+// delivered. After the platform fan-out (success or failure) the stored
+// history message carrying the same extras.id is removed and a
+// DeletionByExtraID tombstone is appended to the device's deletion log, so
+// already-synced clients delete their local copy on the next
+// ?deletedSince= page. An explicit `platform` narrows the target set; a key
+// with no remaining target at all is rejected with 400.
 func pushDelete(rid string, msg *apns.PushMessage) (int, error) {
 	maskedKey := logging.MaskMiddle(msg.DeviceKey)
 
@@ -991,6 +995,23 @@ func pushDelete(rid string, msg *apns.PushMessage) (int, error) {
 			successCount++
 		}
 	}
+
+	// Clean the server-side history copy of the deleted extras.id and log an
+	// extras.id tombstone so already-synced clients drop their local copy on
+	// the next deletion-log page. History is device_key-scoped (shared across
+	// platforms), so this runs even when `platform` narrowed the target set,
+	// and regardless of whether the platform fan-out succeeded. Best-effort:
+	// a store failure only logs a warning, never alters the response code.
+	if gotifyService != nil {
+		if removed, err := gotifyService.DeleteMessageByExtraID(msg.DeviceKey, msg.Id); err != nil {
+			logger.Warnf("[Push] rid=%s delete history cleanup failed: device_key=%s id=%q err=%v",
+				rid, maskedKey, msg.Id, err)
+		} else {
+			logger.Infof("[Push] rid=%s delete history cleanup: device_key=%s id=%q removed=%v",
+				rid, maskedKey, msg.Id, removed)
+		}
+	}
+
 	if successCount > 0 {
 		logger.Infof("[Push] rid=%s delete ok: device_key=%s harmonyTargets=%d iosTargets=%d",
 			rid, maskedKey, len(harmonyTokens), len(iosTargets))

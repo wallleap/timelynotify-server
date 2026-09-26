@@ -177,6 +177,14 @@ func (s *Service) DeleteMessageByDevice(device string, id uint64) (bool, error) 
 	return s.store.DeleteByDevice(device, id)
 }
 
+// DeleteMessageByExtraID removes the device's message carrying the given
+// extras.id (if any) and always appends a DeletionByExtraID log entry so
+// already-synced clients drop their local copy on the next sync. The bool
+// reports whether a stored message was removed.
+func (s *Service) DeleteMessageByExtraID(device, extraID string) (bool, error) {
+	return s.store.DeleteByExtraID(device, extraID)
+}
+
 // DeleteAllMessagesByDevice removes every stored message belonging to device
 // (device=="" removes everything).
 func (s *Service) DeleteAllMessagesByDevice(device string) error {

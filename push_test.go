@@ -16,6 +16,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/wallleap/timelynotify-server/apns"
 	"github.com/wallleap/timelynotify-server/database"
+	"github.com/wallleap/timelynotify-server/internal/gotifycompat"
 )
 
 // Before running the tests, a valid deviceToken must be set. Otherwise, the tests will fail.
@@ -1278,6 +1279,78 @@ func TestHarmonyDeleteIOSOnlyKeepsSilentPush(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&revokeCalls); got != 0 {
 		t.Errorf("revoke seam must not be called without harmony targets, got %d", got)
+	}
+}
+
+// TestHarmonyDeleteCleansHistory verifies the server-side cleanup wired into
+// pushDelete: a delete=1 request removes the stored history message carrying
+// the same extras.id and appends a DeletionByExtraID record to the device's
+// deletion log (surfaced as extraIds), on top of the platform fan-out.
+func TestHarmonyDeleteCleansHistory(t *testing.T) {
+	// Swap the global gotify service for a fresh bbolt-backed one.
+	old := gotifyService
+	svc, err := gotifycompat.Init(gotifycompat.Config{
+		DataDir:     t.TempDir(),
+		ClientToken: "delete-history-token",
+	})
+	if err != nil {
+		t.Fatalf("gotifycompat.Init: %v", err)
+	}
+	gotifyService = svc
+	t.Cleanup(func() {
+		gotifyService = old
+		_ = svc.Close()
+	})
+
+	// Seed the history message targeted by the delete (extras.id=4242).
+	if err := svc.Publish("t", "b", 0, map[string]interface{}{"device_key": key, "id": "4242"}); err != nil {
+		t.Fatalf("seed publish: %v", err)
+	}
+	// Anchor event so the deletion-log baseline cursor is non-zero.
+	if err := svc.Publish("anchor", "b", 0, map[string]interface{}{"device_key": key}); err != nil {
+		t.Fatalf("anchor publish: %v", err)
+	}
+	if ok, err := svc.DeleteMessageByDevice(key, 2); err != nil || !ok {
+		t.Fatalf("anchor delete: ok=%v err=%v", ok, err)
+	}
+	base, err := svc.DeletionsByDevice(key, 0)
+	if err != nil || base.Cursor == 0 {
+		t.Fatalf("baseline cursor: %+v err=%v", base, err)
+	}
+
+	registerHarmonyUnderTestKey(t, "harmony-delete-history-token")
+	overrideRevokeHarmony(t, func([]string, int) (int, int, error) {
+		return 200, 80000000, nil
+	})
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		return 200, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","delete":1,"id":4242}`, true)
+	if res.StatusCode != 200 {
+		t.Fatalf("delete should succeed, got %d: %s", res.StatusCode, decodeBody(t, res))
+	}
+
+	// The server-side history copy must be gone.
+	msgs, err := svc.MessagesByDevice(key, 100, 0)
+	if err != nil {
+		t.Fatalf("MessagesByDevice: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("history message must be removed by delete=1, got %+v", msgs)
+	}
+
+	// The deletion log carries both the kind=1 tombstone of the removed
+	// message (id 1) and the extras.id record.
+	page, err := svc.DeletionsByDevice(key, base.Cursor)
+	if err != nil {
+		t.Fatalf("DeletionsByDevice: %v", err)
+	}
+	if len(page.ExtraIDs) != 1 || page.ExtraIDs[0] != 4242 {
+		t.Fatalf("want extraIds [4242], got %v", page.ExtraIDs)
+	}
+	if len(page.IDs) != 1 || page.IDs[0] != 1 {
+		t.Fatalf("want kind=1 ids [1], got %v", page.IDs)
 	}
 }
 

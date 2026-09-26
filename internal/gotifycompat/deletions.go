@@ -22,6 +22,9 @@ const (
 	// DeletionReset is the retention sentinel inserted before old log rows
 	// are dropped: every later event starts after an unrecoverable gap.
 	DeletionReset DeletionKind = 3
+	// DeletionByExtraID records an explicit deletion by extras.id (pushDelete).
+	// The original message may or may not exist in the store at delete time.
+	DeletionByExtraID DeletionKind = 4
 )
 
 const (
@@ -49,6 +52,10 @@ type DeletionsPage struct {
 	// Purges lists the purge ceilings on this page (ascending): the client
 	// drops every locally cached message with id <= ceiling.
 	Purges []uint64 `json:"purges"`
+	// ExtraIDs lists the extras.id values of explicit pushDelete removals on
+	// this page (ascending, parsed to int64). Clients use this to drop their
+	// local copy keyed by extras.id, independent of the server-side id.
+	ExtraIDs []int64 `json:"extraIds"`
 	// Cursor is the continuation point. While HasMore is true it equals the
 	// last event id on this page (feed it back as ?deletedSince=); on the
 	// final page it is the device's current maximum event id and should be
@@ -69,6 +76,7 @@ type deletionRecord struct {
 	Kind      DeletionKind `json:"k"`
 	MessageID uint64       `json:"m,omitempty"`
 	Ceiling   uint64       `json:"c,omitempty"`
+	ExtraID   string       `json:"e,omitempty"`
 	CreatedAt int64        `json:"t"`
 }
 

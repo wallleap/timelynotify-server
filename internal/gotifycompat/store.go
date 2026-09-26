@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,13 @@ type Store interface {
 	// DeleteByDevice removes the message only when it belongs to the given
 	// device; the bool reports whether such a message existed.
 	DeleteByDevice(device string, id uint64) (bool, error)
+	// DeleteByExtraID removes the first message (newest-first) whose extras.id
+	// matches extraID AND belongs to device, recording a kind=1 tombstone when
+	// one was removed (same as DeleteByDevice). Regardless of whether a message
+	// was found, it appends a kind=DeletionByExtraID record carrying the raw
+	// extras.id so already-synced clients can drop their local copy on the next
+	// deletion-log page. The bool reports whether a message was removed.
+	DeleteByExtraID(device, extraID string) (bool, error)
 	// DeleteAll removes every stored message.
 	DeleteAll() error
 	// DeleteAllByDevice removes every message that belongs to the device.
@@ -600,7 +608,7 @@ func (s *bboltStore) AfterByDevice(device string, after uint64, limit int) ([]Me
 
 // DeletionsByDevice implements the deletion-log query; see Store interface.
 func (s *bboltStore) DeletionsByDevice(device string, since uint64) (DeletionsPage, error) {
-	page := DeletionsPage{IDs: []uint64{}, Purges: []uint64{}}
+	page := DeletionsPage{IDs: []uint64{}, Purges: []uint64{}, ExtraIDs: []int64{}}
 	err := s.db.View(func(tx *bolt.Tx) error {
 		idx := tx.Bucket([]byte(bucketDeletionDevice))
 		rows := tx.Bucket([]byte(bucketDeletions))
@@ -673,6 +681,12 @@ func (s *bboltStore) DeletionsByDevice(device string, since uint64) (DeletionsPa
 				page.IDs = append(page.IDs, rec.MessageID)
 			case DeletionPurge:
 				page.Purges = append(page.Purges, rec.Ceiling)
+			case DeletionByExtraID:
+				// ExtraID is guaranteed a positive integer by the pushDelete
+				// entry; a corrupted row is skipped without breaking the page.
+				if n, err := strconv.ParseInt(rec.ExtraID, 10, 64); err == nil {
+					page.ExtraIDs = append(page.ExtraIDs, n)
+				}
 			}
 			projected++
 			lastIncluded = id
@@ -779,6 +793,66 @@ func (s *bboltStore) Delete(id uint64) (bool, error) {
 
 func (s *bboltStore) DeleteByDevice(device string, id uint64) (bool, error) {
 	return s.deleteScoped(device, id)
+}
+
+// DeleteByExtraID removes the first message (newest-first) matching
+// device + extras.id, then appends a kind=DeletionByExtraID record whether
+// or not a message existed: clients that already synced the message use the
+// extras.id record to drop their local copy, while the (possibly absent)
+// server-side copy is cleaned in the same transaction.
+func (s *bboltStore) DeleteByExtraID(device, extraID string) (bool, error) {
+	var existed bool
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketMessages))
+		c := b.Cursor()
+		// Scan newest-first for the message matching device + extras.id
+		// (same walk as UpsertByExtraID).
+		_, _ = c.Seek(uint64Bytes(^uint64(0)))
+		k, v := c.Prev()
+		for k != nil {
+			var msg Message
+			if err := json.Unmarshal(v, &msg); err == nil {
+				msg.ID = bytesUint64(k)
+				if msg.SourceDevice() == device && extraIDOf(&msg) == extraID {
+					if err := b.Delete(k); err != nil {
+						return err
+					}
+					if err := indexMessageRemove(tx, msg.SourceDevice(), msg.ID); err != nil {
+						return err
+					}
+					if _, err := addDeletionTx(tx, deletionRecord{
+						DeviceKey: msg.SourceDevice(),
+						Kind:      DeletionSingle,
+						MessageID: msg.ID,
+					}); err != nil {
+						return err
+					}
+					existed = true
+					break
+				}
+			}
+			k, v = c.Prev()
+		}
+		if existed {
+			mb := tx.Bucket([]byte(bucketMeta))
+			count := metaUint64(mb, keyCount)
+			if count > 0 {
+				count--
+			}
+			if err := mb.Put(keyCount, uint64Bytes(count)); err != nil {
+				return err
+			}
+		}
+		// The extras.id tombstone is written unconditionally so clients that
+		// already migrated the message locally still learn about the removal.
+		_, err := addDeletionTx(tx, deletionRecord{
+			DeviceKey: device,
+			Kind:      DeletionByExtraID,
+			ExtraID:   extraID,
+		})
+		return err
+	})
+	return existed, err
 }
 
 // deleteScoped removes one message (optionally requiring device ownership);
@@ -1265,7 +1339,7 @@ func (s *memoryStore) AfterByDevice(device string, after uint64, limit int) ([]M
 func (s *memoryStore) DeletionsByDevice(device string, since uint64) (DeletionsPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	page := DeletionsPage{IDs: []uint64{}, Purges: []uint64{}}
+	page := DeletionsPage{IDs: []uint64{}, Purges: []uint64{}, ExtraIDs: []int64{}}
 	var minID, maxID uint64
 	for _, r := range s.dels {
 		if r.DeviceKey != device {
@@ -1308,6 +1382,10 @@ func (s *memoryStore) DeletionsByDevice(device string, since uint64) (DeletionsP
 			page.IDs = append(page.IDs, r.MessageID)
 		case DeletionPurge:
 			page.Purges = append(page.Purges, r.Ceiling)
+		case DeletionByExtraID:
+			if n, err := strconv.ParseInt(r.ExtraID, 10, 64); err == nil {
+				page.ExtraIDs = append(page.ExtraIDs, n)
+			}
 		}
 		projected++
 		lastIncluded = r.ID
@@ -1515,6 +1593,36 @@ func (s *memoryStore) DeleteByDevice(device string, id uint64) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.deleteScopedLocked(id, device), nil
+}
+
+// DeleteByExtraID mirrors the bbolt semantics: drop the first message
+// (newest-first) matching device + extras.id when present, and always append
+// a kind=DeletionByExtraID record so already-synced clients drop their local
+// copy on the next deletion-log page.
+func (s *memoryStore) DeleteByExtraID(device, extraID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existed := false
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		msg := s.msgs[id]
+		if msg.SourceDevice() == device && extraIDOf(&msg) == extraID {
+			s.removeLocked(id)
+			s.addDeletionLocked(deletionRecord{
+				DeviceKey: msg.SourceDevice(),
+				Kind:      DeletionSingle,
+				MessageID: id,
+			})
+			existed = true
+			break
+		}
+	}
+	s.addDeletionLocked(deletionRecord{
+		DeviceKey: device,
+		Kind:      DeletionByExtraID,
+		ExtraID:   extraID,
+	})
+	return existed, nil
 }
 
 func (s *memoryStore) DeleteAll() error {
