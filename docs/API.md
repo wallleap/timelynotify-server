@@ -385,6 +385,7 @@ curl "http://127.0.0.1:18080/<your key>?delete=1&id=12345"
 - **鸿蒙目标**：调用华为 v1 `messages:revoke` 撤回相同 `id`（华为 notifyId）的通知——**尚未下发到端侧或已展示但未点击**的通知会被移除；
 - **iOS 目标**：Bark 原生行为——经静默推送（ContentAvailable）下发，Bark App 删除相同 `id` 的通知（**同时移除系统通知中心与 App 历史记录**）；需在系统设置里为 Bark 开启「后台 App 刷新」，否则无效；
 - 同一 key 同时绑定 iOS 与鸿蒙时，一次 `delete=1` 两端同时删除；**任一平台成功即返回 200**，全部失败才 500；该 key 下无任何有效目标（含 `platform` 收窄后无目标）时返回 400；
+- **服务端历史同步删除**：无论平台投递成败，服务端同时删除该 `device_key` 下 `extras.id` 相同的历史消息（客户端尚未同步则永远收不到），并写入一条按 `extras.id` 删除的流水记录（见下文 `deletions` 信封的 `extraIds`），已同步该消息的客户端在下轮 `deletedSince` 同步时据此删除本地副本；历史按 `device_key` 共享，故 `platform` 收窄投递平台不影响该清理；
 - 鸿蒙撤回端点为华为 v1 `messages:revoke`，URL 中的应用级 **Client ID** 与发送端点（v3 `projectId`）不同，需在 `harmony/harmony_certs.go` 的 `clientID` 配置：取 AGC「项目设置 → 常规 → 应用信息 → **OAuth 2.0客户端ID(凭据)-Client ID**」（值等于 APP ID）。**注意不要填成项目级 Client ID**（即 `agconnect-services.json` 顶层 `client.client_id`，两种 ID 同页并存）——填成项目级会报 `80300002 No permission to send message to these tmIDs`；未配置时鸿蒙删除请求快速报错（iOS 静默推送不受影响），正常推送不受影响；
 - 鸿蒙撤回请求体为扁平结构 `{"notifyId": <id>, "token": [...]}`，`push-type: 0`；失败时 80200001/80300007 视为失效 token，按平台定向清理鸿蒙记录；
 - 批量推送与 MCP 接口同样支持 `delete` 参数（走同一条 `push()` 链路）；
@@ -605,17 +606,18 @@ curl "http://127.0.0.1:18080/my-device/message?limit=-1&token=<clientToken>"
   "deletions": {
     "ids": [12, 18],
     "purges": [250],
+    "extraIds": [4242],
     "cursor": 305,
     "hasMore": false,
     "reset": false
   }
-}
 ```
 
 | 字段 | 说明 |
 | --- | --- |
-| ids | 本页「删除单条」事件对应的消息 id（升序）。来源包括：`DELETE /:id`、`ttl` 过期清扫、`--gotify-max-messages` 容量淘汰 |
+| ids | 本页「删除单条」事件对应的消息 id（升序）。来源包括：`DELETE /:id`、`ttl` 过期清扫、`--gotify-max-messages` 容量淘汰、`delete=1` 推送删除命中历史消息时 |
 | purges | 本页「清空全部」事件的 ceiling（升序），即清空发生时刻该设备的最大消息 id；客户端删除本地所有 id ≤ ceiling 的缓存。多条时取 max 即可 |
+| extraIds | 本页「按 extras.id 显式删除」事件对应的 `extras.id`（升序，int64）。来源仅 `delete=1` 推送删除（无论当时服务端是否还存在该消息都会记录）；已同步该消息的客户端据此删除本地以 `extras.id` 定位的副本 |
 | cursor | 该设备删除流水当前最大 id。客户端持久化，下次作为 deletedSince；hasMore=true 时等于本页最后一条事件 id（用于翻页），终页为当前最大游标 |
 | hasMore | 本页事件超过 500 条时为 true，用返回的 cursor 继续翻页直到 false（每页固定上限 500，与消息的 limit 无关） |
 | reset | 客户端游标已落入流水保留期缺口（见下）：此时 ids/purges 必为空数组、cursor 为当前最大游标；客户端应**清空本地该设备缓存 → 用不带 after 的首页接口重新播种 → 以该 cursor 为基准增量** |
