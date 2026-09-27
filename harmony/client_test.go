@@ -65,6 +65,27 @@ func TestMergeClickActionData(t *testing.T) {
 	}
 }
 
+func TestMergeNoticeClickTarget(t *testing.T) {
+	got := MergeNoticeClickTarget(`{"custom":"keep","tn_action":"none"}`, "alert", "db-instance", 42)
+	var values map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &values); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]interface{}{
+		"custom": "keep", "tn_action": "alert", "tn_instance_id": "db-instance", "tn_message_id": "42",
+	} {
+		if values[key] != want {
+			t.Errorf("%s = %v, want %v", key, values[key], want)
+		}
+	}
+	if got := MergeNoticeClickTarget("", "none", "", 0); got != `{"tn_action":"none"}` {
+		t.Errorf("none data = %s", got)
+	}
+	if got := MergeNoticeClickTarget("null", "alert", "db-instance", 1); got == "" {
+		t.Fatal("JSON null data must still accept click metadata")
+	}
+}
+
 // TestClient_Send_EmptyTokens verifies that sending with no tokens fails early.
 func TestClient_Send_EmptyTokens(t *testing.T) {
 	ts, _ := NewTokenSource()

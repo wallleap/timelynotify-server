@@ -228,6 +228,13 @@ func (s *Service) SubscriberCount() int {
 // errors are returned to the caller, which must never block or alter the
 // originating push.
 func (s *Service) Publish(title, body string, priority int, extras map[string]interface{}) error {
+	_, err := s.PublishWithID(title, body, priority, extras)
+	return err
+}
+
+// PublishWithID persists and fans out a message, returning its database ID.
+// An update by extras.id returns the existing ID rather than allocating a new one.
+func (s *Service) PublishWithID(title, body string, priority int, extras map[string]interface{}) (uint64, error) {
 	if extras == nil {
 		extras = map[string]interface{}{}
 	}
@@ -256,11 +263,11 @@ func (s *Service) Publish(title, body string, priority int, extras map[string]in
 		id, err = s.store.Add(&m)
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	m.ID = id
 	s.hub.Publish(m)
-	return nil
+	return id, nil
 }
 
 // MessagesAfterByDevice returns the device's messages with ID > after in

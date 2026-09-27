@@ -1047,6 +1047,23 @@ func TestPublishWithID_Overwrites(t *testing.T) {
 	}
 }
 
+func TestPublishWithIDReturnsStoredIdentity(t *testing.T) {
+	svc := buildTestService(t, "")
+	extras := map[string]interface{}{"device_key": "d1", "id": "logical-1"}
+	first, err := svc.PublishWithID("first", "body", 0, extras)
+	if err != nil || first == 0 {
+		t.Fatalf("first PublishWithID = (%d, %v)", first, err)
+	}
+	updated, err := svc.PublishWithID("updated", "body", 0, extras)
+	if err != nil || updated != first {
+		t.Fatalf("overwrite id = (%d, %v), want %d", updated, err, first)
+	}
+	other, err := svc.PublishWithID("other", "body", 0, map[string]interface{}{"device_key": "d2"})
+	if err != nil || other == first {
+		t.Fatalf("other id = (%d, %v), must differ from %d", other, err, first)
+	}
+}
+
 // TestPublishWithID_NewWhenNoMatch verifies that publishing with an extras.id
 // that doesn't match any existing message creates a new entry (like Add).
 func TestPublishWithID_NewWhenNoMatch(t *testing.T) {

@@ -680,8 +680,9 @@ func push(rid string, params map[string]interface{}) (int, error) {
 	}
 	harmonyPassive := hasHarmonyTarget && pushpolicy.HarmonyPassive(msg.ExtParams)
 	var historyErr error
+	var historyID uint64
 	if pushpolicy.ShouldPublishHistory(msg.ExtParams, hasHarmonyTarget) {
-		historyErr = gotifyPublish(&msg)
+		historyID, historyErr = gotifyPublishWithID(&msg)
 		if historyErr != nil {
 			logger.Errorf("[Push] rid=%s history publish failed: device_key=%s err=%v", rid, maskedKey, historyErr)
 		}
@@ -697,7 +698,7 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			logger.Infof("[Push] rid=%s HarmonyOS passive stored for sync: device_key=%s", rid, maskedKey)
 			return 200, nil
 		}
-		return pushToDevice(rid, di, &msg)
+		return pushToDevice(rid, di, &msg, historyID)
 	}
 
 	if len(targets) == 1 {
@@ -743,13 +744,13 @@ func push(rid string, params map[string]interface{}) (int, error) {
 // distinct DeviceToken fields without racing on the shared struct.
 // rid is threaded through to the platform-specific push function for log
 // correlation.
-func pushToDevice(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+func pushToDevice(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage, historyID uint64) (int, error) {
 	m := *msg
 	m.DeviceToken = deviceInfo.Token
 	if deviceInfo.Platform == "harmony" {
 		initHarmony()
 		logger.Infof("[Push] rid=%s routing to HarmonyOS: device_key=%s", rid, logging.MaskMiddle(m.DeviceKey))
-		return pushToHarmony(rid, deviceInfo, &m)
+		return pushToHarmony(rid, deviceInfo, &m, historyID)
 	}
 	logger.Infof("[Push] rid=%s routing to APNs: device_key=%s", rid, logging.MaskMiddle(m.DeviceKey))
 	return pushToAPNs(rid, deviceInfo, &m)
@@ -776,12 +777,12 @@ func pushToAPNs(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessa
 
 // pushToHarmony sends notification via Huawei Push Kit (V3 scenario API).
 //
-// V3 clickAction only has actionType 0 (open app home) or 1 (open inner
-// page); the legacy V1 launch/banner/page display mapping does not apply.
+// V3 clickAction actionType 0 opens the app; the client routes its data to
+// the correct server and detail sheet when Bark action=alert.
 // The Bark `level` field has no direct V3 equivalent: passive is stored for
 // client sync before this function, while active/timeSensitive/critical all
-// use the ordinary alert with actionType 0 (open app home on click).
-func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
+// use the ordinary alert with actionType 0 (app-side click routing).
+func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage, historyID uint64) (int, error) {
 	if harmonyClient == nil {
 		logger.Errorf("[Push] rid=%s HarmonyOS client not initialized: device_key=%s",
 			rid, logging.MaskMiddle(msg.DeviceKey))
@@ -805,6 +806,15 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	if pushURL, ok := msg.ExtParams["url"].(string); ok {
 		dataStr = harmony.MergeClickActionData(dataStr, pushURL)
 	}
+	clickAction := "alert"
+	if value, ok := msg.ExtParams["action"].(string); ok && strings.EqualFold(value, "none") {
+		clickAction = "none"
+	}
+	instanceID := ""
+	if gotifyService != nil && historyID != 0 {
+		instanceID = gotifyService.InstanceID()
+	}
+	dataStr = harmony.MergeNoticeClickTarget(dataStr, clickAction, instanceID, historyID)
 
 	// Huawei exposes one notification.image URL. Bark icon has priority;
 	// Bark image is the fallback when no icon was supplied.
@@ -866,13 +876,21 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	// message, so the app can fetch and decrypt them after the user opens it.
 	if ciphertext, ok := msg.ExtParams["ciphertext"].(string); ok && strings.TrimSpace(ciphertext) != "" {
 		placeholderTitle, placeholderBody := pushpolicy.EncryptedPlaceholder(msg.ExtParams)
+		// A separately supplied Bark URL is intentionally a click target, not
+		// plaintext notification content; it takes precedence over action.
+		encryptedClickData := ""
+		if pushURL, ok := msg.ExtParams["url"].(string); ok {
+			encryptedClickData = harmony.MergeClickActionData(encryptedClickData, pushURL)
+		}
+		encryptedClickData = harmony.MergeNoticeClickTarget(encryptedClickData, clickAction, instanceID, historyID)
 		logger.Infof("[Push] rid=%s HarmonyOS encrypted placeholder push: device_key=%s token=%s notifyId=%d",
 			rid, logging.MaskMiddle(msg.DeviceKey), logging.MaskMiddle(deviceInfo.Token), notifyId)
 		_, hmsCode, err := pushHarmony(
 			[]string{deviceInfo.Token},
 			placeholderTitle,
 			placeholderBody,
-			"",
+			// Only explicit URL and routing metadata are sent in clear text.
+			encryptedClickData,
 			"",
 			actionType,
 			badgeArg,

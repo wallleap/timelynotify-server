@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -744,6 +745,64 @@ func TestHarmonyLevelDelivery(t *testing.T) {
 			}
 			if len(messages) > 0 && messages[0].Extras["level"] != tt.level {
 				t.Errorf("stored level = %v, want %q", messages[0].Extras["level"], tt.level)
+			}
+		})
+	}
+}
+
+func TestHarmonyClickActionCarriesExactHistoryTarget(t *testing.T) {
+	tests := []struct {
+		name          string
+		extra         string
+		wantAction    string
+		wantURL       string
+		wantEncrypted bool
+	}{
+		{name: "default alert", wantAction: "alert"},
+		{name: "none", extra: `,"action":"none"`, wantAction: "none"},
+		{name: "url wins", extra: `,"action":"none","url":"https://example.com"`, wantAction: "none", wantURL: "https://example.com"},
+		{name: "encrypted target", extra: `,"ciphertext":"secret-ciphertext","iv":"secret-iv"`, wantAction: "alert", wantEncrypted: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := gotifyService
+			svc, err := gotifycompat.Init(gotifycompat.Config{DataDir: t.TempDir(), ClientToken: "click-test-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotifyService = svc
+			t.Cleanup(func() { gotifyService = old; _ = svc.Close() })
+			registerHarmonyUnderTestKey(t, "harmony-click-token")
+
+			var clickData string
+			overridePushHarmony(t, func(_ []string, _, _, data, _ string, actionType int, _ *int, _ string, _, _ int, _ []string, _ int) (int, int, error) {
+				if actionType != 0 {
+					t.Errorf("actionType = %d, want 0", actionType)
+				}
+				clickData = data
+				return 200, 80000000, nil
+			})
+			res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","platform":"harmony","title":"t","body":"b"`+tt.extra+`}`, true)
+			if res.StatusCode != 200 {
+				t.Fatalf("push status = %d: %s", res.StatusCode, decodeBody(t, res))
+			}
+			var data map[string]interface{}
+			if err := json.Unmarshal([]byte(clickData), &data); err != nil {
+				t.Fatalf("click data %q: %v", clickData, err)
+			}
+			messages, err := svc.MessagesByDevice(key, 10, 0)
+			if err != nil || len(messages) != 1 {
+				t.Fatalf("history = %+v, err=%v", messages, err)
+			}
+			if data["tn_action"] != tt.wantAction || data["tn_instance_id"] != svc.InstanceID() ||
+				data["tn_message_id"] != strconv.FormatUint(messages[0].ID, 10) {
+				t.Errorf("click data = %+v", data)
+			}
+			if tt.wantURL != "" && data["url"] != tt.wantURL {
+				t.Errorf("click URL = %v, want %q", data["url"], tt.wantURL)
+			}
+			if tt.wantEncrypted && (data["ciphertext"] != nil || data["iv"] != nil || data["device_key"] != nil) {
+				t.Errorf("encrypted click data leaked secrets: %+v", data)
 			}
 		})
 	}

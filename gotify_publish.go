@@ -11,9 +11,10 @@ import (
 // monitoring stream that hotify-bridge consumes. It is invoked from push()
 // right after the device token is resolved. Most pushes treat storage errors
 // as best-effort; Harmony passive requires a successful write to sync later.
-func gotifyPublish(msg *apns.PushMessage) error {
+// gotifyPublishWithID returns the persisted ID for a Harmony click target.
+func gotifyPublishWithID(msg *apns.PushMessage) (uint64, error) {
 	if gotifyService == nil {
-		return fmt.Errorf("history service unavailable")
+		return 0, fmt.Errorf("history service unavailable")
 	}
 
 	extras := make(map[string]interface{}, len(msg.ExtParams)+2)
@@ -30,10 +31,11 @@ func gotifyPublish(msg *apns.PushMessage) error {
 		title = "TimelyNotify"
 	}
 
-	if err := gotifyService.Publish(title, msg.Body, gotifyPriority(extras), extras); err != nil {
-		return fmt.Errorf("publish history: %w", err)
+	id, err := gotifyService.PublishWithID(title, msg.Body, gotifyPriority(extras), extras)
+	if err != nil {
+		return 0, fmt.Errorf("publish history: %w", err)
 	}
-	return nil
+	return id, nil
 }
 
 // gotifyPriority maps the "level" parameter onto gotify's 0-2 scale.

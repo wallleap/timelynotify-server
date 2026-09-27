@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -307,7 +308,7 @@ func (c *Client) Revoke(targetTokens []string, notifyId int) (httpStatus int, hm
 // the raw string under a "data" key so custom data is never lost.
 func parseDataField(data string) map[string]interface{} {
 	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(data), &obj); err == nil {
+	if err := json.Unmarshal([]byte(data), &obj); err == nil && obj != nil {
 		return obj
 	}
 	return map[string]interface{}{"data": data}
@@ -326,12 +327,37 @@ func MergeClickActionData(data, url string) string {
 	if data != "" {
 		values = parseDataField(data)
 	}
+	if values == nil {
+		values = make(map[string]interface{})
+	}
 	values["url"] = url
 
 	encoded, err := json.Marshal(values)
 	if err != nil {
 		// values only comes from JSON-decoded data plus strings, so marshaling
 		// should not fail. Preserve the original custom data defensively.
+		return data
+	}
+	return string(encoded)
+}
+
+// MergeNoticeClickTarget adds the application-side action and an exact history
+// locator. Message IDs are strings because Want parameters must not lose uint64
+// precision in JavaScript. Reserved tn_* keys override untrusted custom data.
+func MergeNoticeClickTarget(data, action, instanceID string, messageID uint64) string {
+	values := make(map[string]interface{})
+	if data != "" {
+		values = parseDataField(data)
+	}
+	values["tn_action"] = action
+	delete(values, "tn_instance_id")
+	delete(values, "tn_message_id")
+	if instanceID != "" && messageID != 0 {
+		values["tn_instance_id"] = instanceID
+		values["tn_message_id"] = strconv.FormatUint(messageID, 10)
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
 		return data
 	}
 	return string(encoded)
