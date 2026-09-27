@@ -308,7 +308,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 
 | ------ | ------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | copy   | string | 指定复制推送时复制的内容，比如只复制正文里的验证码；不传这个参数时，复制到的是推送正文 | 详情页 action 区在最左侧显示"复制"按钮（仅 copy 时独占整行，与 url 并存时三项等宽）；autoCopy 触发时优先复制此字段，为空则回退复制 body；可放入加密载荷 |
 | url    | string | 点击推送时跳转的 URL，支持 URL Scheme 和 Universal Link；`http`/`https` 链接优先用 Universal Link 打开，失败时用 Safari，其他 Scheme 直接交给系统处理 | 点击跳转到指定 URL |
-| action | string | 传 `alert` 时，点击推送打开 App 会弹出操作弹窗，可复制推送内容或分享；传 `none` 时只打开 App，不跳转到具体页面，其他值按默认行为处理；同时传了 `url` 时优先按 `url` 跳转 | 目前固定点击跳转应用首页                                     |
+| action | string | 传 `alert` 时，点击推送打开 App 会弹出操作弹窗，可复制推送内容或分享；传 `none` 时只打开 App，不跳转到具体页面，其他值按默认行为处理；同时传了 `url` 时优先按 `url` 跳转 | `alert`（默认）同步并打开对应通知详情；单服务器视图会切到来源服务。`none` 只打开通知首页；`url` 优先。未归档、过期或来源不可用时停留首页并提示 |
 
 #### 加密
 
@@ -407,7 +407,7 @@ curl "http://127.0.0.1:18080/<your key>?delete=1&id=12345"
 
 推送鸿蒙设备与 iOS 使用完全相同的 API。
 
-> **Harmony `level` 映射**：`active` 或省略时发送普通华为 V3 通知；`passive` 仅保存到服务端历史，不调用华为 V3，客户端下次同步后才能看到（不会即时提醒）；`timeSensitive` 和 `critical` 暂按 `active` 发送，不具备时效性/重要警告特权。V3 的 `clickAction` 是对象 `{actionType: 0|1}`（0=点击进应用首页、1=进内页），不再是 V1 的 `launch`/`banner`/`page` 字符串；普通通知统一用 `actionType=0`。后续获得相应权益时可再调整特殊级别的实现。
+> **Harmony `level` 映射**：`active` 或省略时发送普通华为 V3 通知；`passive` 仅保存到服务端历史，不调用华为 V3，客户端下次同步后才能看到（不会即时提醒）；`timeSensitive` 和 `critical` 暂按 `active` 发送，不具备时效性/重要警告特权。V3 的 `clickAction` 统一使用 `actionType=0` 打开应用，并在 `data` 中传 `tn_action`、历史数据库实例 ID 和消息 ID；App 根据 `action` 决定是否打开详情。加密通知只额外明传定位信息及用户显式提供的 `url`，不明传正文、密文或 Key。后续获得特殊通知权益时可再调整级别实现。
 >
 > 华为 V3 场景化消息：`category` 默认 `SUBSCRIPTION`（需在 AGC 申请「通知消息自分类权益」并通过审核，否则降级 `MARKETING` 受每设备每日 2/5 条频控且自定义铃声失效）；`foregroundShow` 默认 `true`；`pushOptions.ttl` 默认 86400。
 
