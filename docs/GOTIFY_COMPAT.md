@@ -77,6 +77,7 @@ gotify_token: <上面拿到的 client token>
 - **batch 推送会为每个设备各发布一条消息**（每条一次 `push()`），对应每条设备级投递。
 - 消息保留最近 **1000** 条（`<data>/gotify.db`），超出自动裁剪；桥断线回补最多覆盖最新 100 条。
 - 消息 ID 单调递增（bbolt `NextSequence`），重启不倒退；若存储被重置，桥按 id 倒退信号自动重置水位。
+- `gotify.db` 首次初始化时持久化一个数据库实例 UUID；旧数据库首次升级时补建。`/:device_key/version` 与 `/:device_key/message`（含全量流式导出）返回顶层 `instanceId`、`instancePersistent`。同一数据库重启或清空历史时 UUID 不变，重建数据库后变化；内存降级时每次启动使用临时 UUID，`instancePersistent=false`。客户端应将实例 ID 与 `device_key`、数字消息 ID 组合使用，避免不同数据库中相同自增 ID 被误认作同一消息。直接复制 `gotify.db` 会复制 UUID，独立运行的克隆库不能据此区分。
 - 设备级 `/<device_key>/message`、`/<device_key>/stream`、`/<device_key>/version`
   已加入基础认证白名单（它们走自己的 token 认证/无需认证），开启 `--user/--password` 时不受影响。
 - 兼容路由说明：`/version`、`/message`、`/stream` 为静态路径段（设备级路径 `/<device_key>/version` 等基于这些段），优先于旧版 `GET /:device_key`
