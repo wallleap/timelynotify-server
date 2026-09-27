@@ -5,7 +5,7 @@ bark-server 对外提供一组与 [Gotify](https://gotify.net) 协议兼容的�
 - 像监测 Gotify 一样监测 bark——bark 每收到一次推送，就把它持久化为一条 gotify 风格的消息，并实时推送给订阅者
 - 同时可以获取、删除消息
 
-> iOS / HarmonyOS 侧投递成败**不影响**这条监测流（`gotifyPublish` 在路由到具体推送通道前即执行）
+> 常规推送在路由到具体通道前写入监测流，iOS / HarmonyOS 侧投递成败不影响监测流。例外：Harmony `level=passive` 不调用华为 Push V3，历史写入本身就是该平台的投递；写入失败则该平台失败。
 
 ## 接口
 
@@ -73,6 +73,7 @@ gotify_token: <上面拿到的 client token>
 ## 行为与运维说明
 
 - 推送即发布：`push()` 解析到 `device_token` 后即写入消息并广播，**不等待** APNs 或华为推送结果。
+- Harmony `level=passive` 即使设置 `isArchive=0` 仍写入历史，供客户端下次同步；无即时系统通知。若历史写入失败，只有 Harmony 目标时返回 500；有 iOS 目标时仍按 APNs 结果决定是否成功。
 - **batch 推送会为每个设备各发布一条消息**（每条一次 `push()`），对应每条设备级投递。
 - 消息保留最近 **1000** 条（`<data>/gotify.db`），超出自动裁剪；桥断线回补最多覆盖最新 100 条。
 - 消息 ID 单调递增（bbolt `NextSequence`），重启不倒退；若存储被重置，桥按 id 倒退信号自动重置水位。
@@ -83,4 +84,4 @@ gotify_token: <上面拿到的 client token>
   并返回 `401`，请改用 `POST /push` 或换设备 key。全局 gotify 接口（`/version`、`/message`、`/stream`）已移除。
 - WebSocket 心跳：服务器 45s 发一次 ping；客户端 ping（桥每 20s）会刷新读超时（60s），
   静默失效的连接会被回收。WebSocket 默认放行所有 Origin（桥不发 Origin）。
-- 平台扇出：同一个 `device_key` 可同时绑定 iOS 与鸿蒙记录，推送时默认扇出到该 key 下所有有效平台（任一成功即 200）。监控流**不区分平台**，每次逻辑推送只记录一次，与实际投递的平台数无关；iOS/HarmonyOS 侧投递成败不影响监控流（`gotifyPublish` 在扇出前即执行）。
+- 平台扇出：同一个 `device_key` 可同时绑定 iOS 与鸿蒙记录，推送时默认扇出到该 key 下所有有效平台（任一成功即 200）。监控流**不区分平台**，每次逻辑推送只记录一次，与实际投递的平台数无关；常规推送的 iOS/HarmonyOS 侧投递成败不影响监控流。Harmony `passive` 例外：历史写入结果就是该平台结果。

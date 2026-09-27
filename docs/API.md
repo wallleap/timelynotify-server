@@ -297,7 +297,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 
 
 | 字段   | 类型    | iOS                                                          | HarmonyOS                                                    |
 | ------ | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| level  | string  | 推送级别：`active`（默认，立即亮屏显示）/`timeSensitive`（时效性通知，专注模式下也能显示）/`passive`（仅加入通知列表，不亮屏提醒）/`critical`（重要警告，静音模式下也响铃）；`critical` 需在 App 内授权「重要警告」，未授权时降级为普通通知，铃声音量由 `volume` 控制。需 iOS 15+ | -          |
+| level  | string  | 推送级别：`active`（默认，立即亮屏显示）/`timeSensitive`（时效性通知，专注模式下也能显示）/`passive`（仅加入通知列表，不亮屏提醒）/`critical`（重要警告，静音模式下也响铃）；`critical` 需在 App 内授权「重要警告」，未授权时降级为普通通知，铃声音量由 `volume` 控制。需 iOS 15+ | `active` 正常发送；`passive` 不调用华为 Push V3，只写服务端历史，待客户端同步；`timeSensitive`、`critical` 暂降级为普通 `active` 通知，不具备特殊提醒权益。历史中保留原始 `level` |
 | volume | string  | 重要警告（`level=critical`）的通知音量，取值范围 0-10，不传默认 5；只在重要警告时生效，普通推送的音量由系统控制，不受这个参数影响 | -        |
 | call   | string  | 传 `"1"` 时把通知铃声循环播放 30 秒（默认只响一次），用于强提醒场景；配合 `sound` 指定铃声，与 `level=critical` 一起用时可用 `volume` 调整音量 | -                                                            |
 | sound  | string  | 推送使用的铃声名称，例如 `minuet`（自动补 `.caf` 后缀）；App 内置铃声和自己导入的铃声都可用，导入铃声需 `.caf` 格式、不超过 30 秒，在 App 内铃声设置导入；不传时使用 App 设置里的默认铃声，名称不存在时回退默认提示音；内置铃声列表见 [Bark Sounds](https://github.com/Finb/Bark/tree/master/Sounds) | 铃声名与 Bark 一致，自动补 `.mp3` 后缀 |
@@ -322,7 +322,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 
 | 字段      | 类型             | iOS                                                          | HarmonyOS                                                    |
 | --------- | ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | id        | string / integer | 通知唯一标识：使用相同的 `id` 时，新推送会**更新替换**原通知（不重复堆叠，适合进度/状态类）；`delete` 删除通知也靠它定位<br/>需 Bark v1.5.2、bark-server v2.2.5 以上；官方 App 要求 JSON 传参使用字符串，本服务端会把数字 id 归一化为字符串下发，故 V2 JSON 传字符串或整数均生效，服务端保留整数的精确十进制形式<br/>传 `id` 时监控流（`/:device_key/message`）中同一 `device_key` + `extras.id` 的消息会被覆盖（保留原消息 ID），不传 `id` 则追加新消息 | integer 映射 `notification.notifyId`（int，范围 `[0, 2147483647]`），相同 `id` 的通知会互相覆盖；非数字 `id` 被忽略（由 Push Kit 自动生成标识）；也是 `delete` 删除模式的目标 notifyId（见 [通知删除](#通知删除deletebark-兼容)） |
-| isArchive | string           | 是否把这条推送保存到 App 的历史记录：传 `1` 保存，传其他值不保存；不传时按 App 内的设置决定，默认为保存 | 同 iOS；未归档的普通通知不写历史。未归档的加密通知会暂存至客户端成功同步并删除远端，不在本地保留 |
+| isArchive | string           | 是否把这条推送保存到 App 的历史记录：传 `1` 保存，传其他值不保存；不传时按 App 内的设置决定，默认为保存 | 同 iOS；未归档的普通通知不写历史，但 `level=passive` 为保证可同步仍写服务端历史。未归档的加密通知会暂存至客户端成功同步并删除远端，不在本地保留 |
 | ttl       | integer          | 已保存推送的有效期（秒），只对保存到历史记录的消息生效；到期后 App 自动删除这条历史记录，同时移除通知中心里对应的推送；适合只在一段时间内有意义的消息，比如验证码、临时告警 | 同 iOS；正整数秒数随历史同步到客户端，客户端按推送时间计算过期时间并清理本地记录 |
 | delete    | string           | 传 `"1"` 时**删除指定通知**：同时从系统通知中心和 Bark App 历史记录里移除，需搭配 `id` 使用；指令经静默推送（ContentAvailable）下发，需在系统设置里为 Bark 开启「后台 App 刷新」，否则无效 | 真值时**删除**相同 `id` 的通知（华为 v1 `messages:revoke`，需正整数 `id`）；短路整条推送链路——忽略其它所有参数、不写监控流。见 [通知删除](#通知删除deletebark-兼容) |
 
@@ -363,6 +363,8 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 
 - 全部失败才返回 500，并带最后一次失败的错误码；
 - 失效 token 按平台定向清理（`ClearDeviceTokenByKeyAndPlatform`），不会跨平台误清；
 - 推送历史只记录一次（gotify 监控流），与平台数无关。
+
+例外：Harmony `level=passive` 以历史写入作为该平台的投递结果，不调用华为接口；写入失败时该平台失败，只有 Harmony 目标时返回 500。同一 Key 若还有 iOS 目标，iOS 仍照常走 APNs，任一平台成功即可返回 200。
 
 **收窄到指定平台**：在推送体里带 `"platform": "ios"` 或 `"platform": "harmony"`，仅推该平台记录。`platform` 是**收窄**而非覆盖——只选择投递哪些已绑定记录，不会改写存储的平台字段。
 
@@ -405,7 +407,7 @@ curl "http://127.0.0.1:18080/<your key>?delete=1&id=12345"
 
 推送鸿蒙设备与 iOS 使用完全相同的 API。
 
-> **`level` 字段是 APNs 概念，华为 V3 无直接对应**：V3 的 `clickAction` 是对象 `{actionType: 0|1}`（0=点击进应用首页、1=进内页），不再是 V1 的 `launch`/`banner`/`page` 字符串。服务端统一用 `actionType=0`（点击进应用首页），V3 通知展示样式由系统按 `category` 与前台状态决定，不再有 launch/banner/page 之分。
+> **Harmony `level` 映射**：`active` 或省略时发送普通华为 V3 通知；`passive` 仅保存到服务端历史，不调用华为 V3，客户端下次同步后才能看到（不会即时提醒）；`timeSensitive` 和 `critical` 暂按 `active` 发送，不具备时效性/重要警告特权。V3 的 `clickAction` 是对象 `{actionType: 0|1}`（0=点击进应用首页、1=进内页），不再是 V1 的 `launch`/`banner`/`page` 字符串；普通通知统一用 `actionType=0`。后续获得相应权益时可再调整特殊级别的实现。
 >
 > 华为 V3 场景化消息：`category` 默认 `SUBSCRIPTION`（需在 AGC 申请「通知消息自分类权益」并通过审核，否则降级 `MARKETING` 受每设备每日 2/5 条频控且自定义铃声失效）；`foregroundShow` 默认 `true`；`pushOptions.ttl` 默认 86400。
 

@@ -2,6 +2,8 @@
 
 Bark 服务端（Finb/bark-server）的独立 fork：Go + Fiber v2 的 iOS (APNs) **和 HarmonyOS (华为 Push Kit)** 推送服务，扩展了 Gotify 兼容监控接口（推送也会进入监控流）和 MCP 接口。不向上游回同步；二进制/镜像/module 均已独立命名。改动清单见 `DIFFERENCES.md`。
 
+Harmony `level` 策略：`active` 正常发送；`passive` 不调用华为 V3，只写历史供客户端同步（即使 `isArchive=0`），历史写入失败视为该平台失败；`timeSensitive`/`critical` 暂按普通 `active` 发送，待取得对应权益再调整。与 iOS 共用 Key 时 iOS 仍独立按 APNs 行为投递。
+
 ## Project
 
 - 入口：根目录 `package main`（`main.go`），urfave/cli v2 定义参数（`BARK_SERVER_*` 环境变量），fiber.New 构建应用。
