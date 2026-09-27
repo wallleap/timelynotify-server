@@ -678,12 +678,30 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			break
 		}
 	}
+	harmonyPassive := hasHarmonyTarget && pushpolicy.HarmonyPassive(msg.ExtParams)
+	var historyErr error
 	if pushpolicy.ShouldPublishHistory(msg.ExtParams, hasHarmonyTarget) {
-		gotifyPublish(&msg)
+		historyErr = gotifyPublish(&msg)
+		if historyErr != nil {
+			logger.Errorf("[Push] rid=%s history publish failed: device_key=%s err=%v", rid, maskedKey, historyErr)
+		}
+	}
+	// Harmony passive is delivered through the history sync queue instead of
+	// Huawei V3. A failed write is a failed Harmony delivery, while an iOS
+	// target (if any) still follows the normal APNs fan-out semantics.
+	deliver := func(di *database.DeviceInfo) (int, error) {
+		if di.Platform == "harmony" && harmonyPassive {
+			if historyErr != nil {
+				return 500, fmt.Errorf("harmony passive history write failed: %w", historyErr)
+			}
+			logger.Infof("[Push] rid=%s HarmonyOS passive stored for sync: device_key=%s", rid, maskedKey)
+			return 200, nil
+		}
+		return pushToDevice(rid, di, &msg)
 	}
 
 	if len(targets) == 1 {
-		return pushToDevice(rid, targets[0], &msg)
+		return deliver(targets[0])
 	}
 
 	logger.Infof("[Push] rid=%s multi-platform fan-out: device_key=%s targets=%d", rid, maskedKey, len(targets))
@@ -699,7 +717,7 @@ func push(rid string, params map[string]interface{}) (int, error) {
 		wg.Add(1)
 		go func(di *database.DeviceInfo) {
 			defer wg.Done()
-			code, err := pushToDevice(rid, di, &msg)
+			code, err := deliver(di)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -760,8 +778,9 @@ func pushToAPNs(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessa
 //
 // V3 clickAction only has actionType 0 (open app home) or 1 (open inner
 // page); the legacy V1 launch/banner/page display mapping does not apply.
-// The Bark `level` field is an APNs concept with no direct V3 equivalent,
-// so we default to actionType 0 (open app home on click).
+// The Bark `level` field has no direct V3 equivalent: passive is stored for
+// client sync before this function, while active/timeSensitive/critical all
+// use the ordinary alert with actionType 0 (open app home on click).
 func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	if harmonyClient == nil {
 		logger.Errorf("[Push] rid=%s HarmonyOS client not initialized: device_key=%s",

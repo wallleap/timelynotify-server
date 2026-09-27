@@ -18,6 +18,8 @@ func TestShouldPublishHistory(t *testing.T) {
 		{name: "encrypted iOS does not need Harmony migration", extras: map[string]interface{}{"isArchive": "0", "ciphertext": "encrypted"}, want: false},
 		{name: "empty ciphertext does not retain", extras: map[string]interface{}{"isArchive": "0", "ciphertext": ""}, hasHarmony: true, want: false},
 		{name: "null ciphertext does not retain", extras: map[string]interface{}{"isArchive": "0", "ciphertext": nil}, hasHarmony: true, want: false},
+		{name: "Harmony passive is retained for sync even without archive", extras: map[string]interface{}{"isArchive": "0", "level": "passive"}, hasHarmony: true, want: true},
+		{name: "iOS passive does not override archive", extras: map[string]interface{}{"isArchive": "0", "level": "passive"}, want: false},
 	}
 
 	for _, tt := range tests {

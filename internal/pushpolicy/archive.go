@@ -17,6 +17,11 @@ const (
 // remote history store. Encrypted Harmony messages are retained temporarily so
 // the client can fetch and decrypt them even when the sender disables archiving.
 func ShouldPublishHistory(extras map[string]interface{}, hasHarmonyTarget bool) bool {
+	// Harmony passive has no Huawei alert; the remote store is its only
+	// delivery path until the client next synchronizes, even with isArchive=0.
+	if hasHarmonyTarget && HarmonyPassive(extras) {
+		return true
+	}
 	archiveValue, archiveSpecified := lookupFold(extras, "isarchive")
 	if !archiveSpecified || isEnabled(archiveValue) {
 		return true

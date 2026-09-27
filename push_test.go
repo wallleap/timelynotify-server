@@ -692,6 +692,127 @@ func registerHarmonyUnderTestKey(t *testing.T, token string) {
 	})
 }
 
+func TestHarmonyLevelDelivery(t *testing.T) {
+	tests := []struct {
+		name             string
+		level            string
+		archive          string
+		wantHarmonyCalls int
+		wantHistory      int
+	}{
+		{name: "active sends alert", level: "active", wantHarmonyCalls: 1, wantHistory: 1},
+		{name: "time sensitive falls back to alert", level: "timeSensitive", wantHarmonyCalls: 1, wantHistory: 1},
+		{name: "critical falls back to alert", level: "critical", wantHarmonyCalls: 1, wantHistory: 1},
+		{name: "passive only stores", level: "passive", wantHistory: 1},
+		{name: "passive overrides no archive", level: "passive", archive: `,"isArchive":0`, wantHistory: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := gotifyService
+			svc, err := gotifycompat.Init(gotifycompat.Config{DataDir: t.TempDir(), ClientToken: "level-test-token"})
+			if err != nil {
+				t.Fatalf("init history: %v", err)
+			}
+			gotifyService = svc
+			t.Cleanup(func() { gotifyService = old; _ = svc.Close() })
+			registerHarmonyUnderTestKey(t, "harmony-level-token")
+
+			harmonyCalls := 0
+			overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string, int) (int, int, error) {
+				harmonyCalls++
+				return 200, 80000000, nil
+			})
+			overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+				t.Fatal("platform=harmony must not call APNs")
+				return 500, errors.New("unexpected APNs call")
+			})
+
+			body := `{"device_key":"` + key + `","platform":"harmony","title":"level test","body":"hello","level":"` + tt.level + `"` + tt.archive + `}`
+			res := doPush(t, "POST", "/push", body, true)
+			if res.StatusCode != 200 {
+				t.Fatalf("push status = %d, want 200: %s", res.StatusCode, decodeBody(t, res))
+			}
+			if harmonyCalls != tt.wantHarmonyCalls {
+				t.Errorf("Huawei calls = %d, want %d", harmonyCalls, tt.wantHarmonyCalls)
+			}
+			messages, err := svc.MessagesByDevice(key, 100, 0)
+			if err != nil {
+				t.Fatalf("read history: %v", err)
+			}
+			if len(messages) != tt.wantHistory {
+				t.Fatalf("history count = %d, want %d", len(messages), tt.wantHistory)
+			}
+			if len(messages) > 0 && messages[0].Extras["level"] != tt.level {
+				t.Errorf("stored level = %v, want %q", messages[0].Extras["level"], tt.level)
+			}
+		})
+	}
+}
+
+func TestHarmonyPassiveStoreUnavailable(t *testing.T) {
+	old := gotifyService
+	gotifyService = nil
+	t.Cleanup(func() { gotifyService = old })
+	registerHarmonyUnderTestKey(t, "harmony-passive-no-store")
+
+	harmonyCalls := 0
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string, int) (int, int, error) {
+		harmonyCalls++
+		return 200, 80000000, nil
+	})
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 200, nil
+	})
+
+	res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","platform":"harmony","body":"hello","level":"passive"}`, true)
+	if res.StatusCode != 500 {
+		t.Errorf("Harmony-only passive without storage status = %d, want 500", res.StatusCode)
+	}
+	res = doPush(t, "POST", "/push", `{"device_key":"`+key+`","body":"hello","level":"passive"}`, true)
+	if res.StatusCode != 200 {
+		t.Errorf("iOS delivery should still succeed, got %d", res.StatusCode)
+	}
+	if harmonyCalls != 0 || apnsCalls != 1 {
+		t.Errorf("Huawei/APNs calls = %d/%d, want 0/1", harmonyCalls, apnsCalls)
+	}
+}
+
+func TestHarmonyPassiveMixedPlatformHistorySuccess(t *testing.T) {
+	old := gotifyService
+	svc, err := gotifycompat.Init(gotifycompat.Config{DataDir: t.TempDir(), ClientToken: "passive-fanout-token"})
+	if err != nil {
+		t.Fatalf("init history: %v", err)
+	}
+	gotifyService = svc
+	t.Cleanup(func() { gotifyService = old; _ = svc.Close() })
+	registerHarmonyUnderTestKey(t, "harmony-passive-fanout")
+
+	harmonyCalls := 0
+	overridePushHarmony(t, func([]string, string, string, string, string, int, *int, string, int, int, []string, int) (int, int, error) {
+		harmonyCalls++
+		return 200, 80000000, nil
+	})
+	apnsCalls := 0
+	overridePushAPNs(t, func(*apns.PushMessage) (int, error) {
+		apnsCalls++
+		return 500, errors.New("APNs unavailable")
+	})
+
+	res := doPush(t, "GET", "/"+key+"/passive-body?level=passive", "", false)
+	if res.StatusCode != 200 {
+		t.Fatalf("stored Harmony passive should succeed despite APNs failure, got %d: %s", res.StatusCode, decodeBody(t, res))
+	}
+	if harmonyCalls != 0 || apnsCalls != 1 {
+		t.Errorf("Huawei/APNs calls = %d/%d, want 0/1", harmonyCalls, apnsCalls)
+	}
+	messages, err := svc.MessagesByDevice(key, 100, 0)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("passive history count = %d, err = %v; want 1", len(messages), err)
+	}
+}
+
 // TestPushMultiPlatformFanOut covers the core multi-platform invariant: when
 // a device_key has both ios and harmony records, a single push fans out to
 // both channels. The HTTP response is 200 if any delivery succeeds.
