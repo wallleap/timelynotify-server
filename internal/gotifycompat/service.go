@@ -37,12 +37,14 @@ const (
 
 // Service ties together token auth, message persistence and the WebSocket hub.
 type Service struct {
-	store       Store
-	hub         *Hub
-	tokenHash   []byte
-	autoToken   string
-	version     string
-	tokenSource TokenSource
+	store              Store
+	hub                *Hub
+	tokenHash          []byte
+	autoToken          string
+	version            string
+	tokenSource        TokenSource
+	instanceID         string
+	instancePersistent bool
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -62,6 +64,17 @@ func Init(cfg Config) (*Service, error) {
 		logger.Errorf("gotify compat: data store unavailable (%v); falling back to in-memory", err)
 		store = newMemoryStore(max)
 	}
+	var instanceID string
+	instancePersistent := false
+	if persistent, ok := store.(*bboltStore); ok {
+		instanceID = persistent.instanceID
+		instancePersistent = true
+	} else {
+		instanceID, err = newInstanceID()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	version := cfg.Version
 	if version == "" {
@@ -69,10 +82,12 @@ func Init(cfg Config) (*Service, error) {
 	}
 
 	svc := &Service{
-		store:   store,
-		hub:     newHub(),
-		version: version,
-		stopCh:  make(chan struct{}),
+		store:              store,
+		hub:                newHub(),
+		version:            version,
+		instanceID:         instanceID,
+		instancePersistent: instancePersistent,
+		stopCh:             make(chan struct{}),
 	}
 	svc.startMaintenance()
 
@@ -150,6 +165,13 @@ func (s *Service) TokenSource() TokenSource {
 func (s *Service) Version() string {
 	return s.version
 }
+
+// InstanceID identifies this history database across restarts. In-memory
+// fallback receives a new temporary ID on each service initialization.
+func (s *Service) InstanceID() string { return s.instanceID }
+
+// InstancePersistent reports whether InstanceID is stored in gotify.db.
+func (s *Service) InstancePersistent() bool { return s.instancePersistent }
 
 // MessagesByDevice returns up to limit stored messages for a single device
 // newest-first, optionally filtered to ID < since. device=="" returns all

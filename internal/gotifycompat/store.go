@@ -98,8 +98,9 @@ type Store interface {
 
 // bbolt-backed store persisted under <data>/gotify.db.
 type bboltStore struct {
-	db  *bolt.DB
-	max int
+	db         *bolt.DB
+	max        int
+	instanceID string
 }
 
 const (
@@ -133,6 +134,7 @@ func openBboltStore(path string, max int) (*bboltStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	var instanceID string
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, name := range []string{
 			bucketMessages,
@@ -147,13 +149,18 @@ func openBboltStore(path string, max int) (*bboltStore, error) {
 				return err
 			}
 		}
-		return migrateIndexes(tx)
+		if err := migrateIndexes(tx); err != nil {
+			return err
+		}
+		var err error
+		instanceID, err = loadOrCreateInstanceID(tx)
+		return err
 	})
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &bboltStore{db: db, max: max}, nil
+	return &bboltStore{db: db, max: max, instanceID: instanceID}, nil
 }
 
 // migrateIndexes backfills the (device_key,id) message index and the ttl

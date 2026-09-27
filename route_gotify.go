@@ -55,7 +55,11 @@ func routeGotifyDeviceVersion(c *fiber.Ctx) error {
 		return c.Status(503).JSON(failed(503, "gotify compat not initialized"))
 	}
 	logger.Infof("[Gotify] version probe: device_key=%s", c.Params("device_key"))
-	return c.JSON(map[string]string{"version": gotifyService.Version()})
+	return c.JSON(map[string]interface{}{
+		"version":            gotifyService.Version(),
+		"instanceId":         gotifyService.InstanceID(),
+		"instancePersistent": gotifyService.InstancePersistent(),
+	})
 }
 
 // messageQuery holds the shared limit/since pagination parsed from a request,
@@ -162,7 +166,7 @@ func exportMessagesStream(c *fiber.Ctx, device string, q messageQuery) error {
 		if walkErr != nil {
 			paging += `,"error":"stream truncated"`
 		}
-		paging += "}}"
+		paging += fmt.Sprintf(`},"instanceId":%q,"instancePersistent":%t}`, gotifyService.InstanceID(), gotifyService.InstancePersistent())
 		_, _ = w.WriteString(paging)
 		_ = w.Flush()
 	})
@@ -250,6 +254,8 @@ func routeGotifyDeviceMessage(c *fiber.Ctx) error {
 		logger.Infof("[Gotify] deletions query success: device_key=%s ids=%d purges=%d cursor=%d hasMore=%t reset=%t",
 			device, len(page.IDs), len(page.Purges), page.Cursor, page.HasMore, page.Reset)
 	}
+	resp["instanceId"] = gotifyService.InstanceID()
+	resp["instancePersistent"] = gotifyService.InstancePersistent()
 
 	logger.Infof("[Gotify] message query success: device_key=%s count=%d", device, count)
 	return c.JSON(resp)

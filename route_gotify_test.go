@@ -64,8 +64,46 @@ type streamPaging struct {
 }
 
 type streamEnvelope struct {
-	Messages []gotifycompat.Message `json:"messages"`
-	Paging   streamPaging           `json:"paging"`
+	Messages           []gotifycompat.Message `json:"messages"`
+	Paging             streamPaging           `json:"paging"`
+	InstanceID         string                 `json:"instanceId"`
+	InstancePersistent bool                   `json:"instancePersistent"`
+}
+
+func TestMessageResponsesIncludeInstanceID(t *testing.T) {
+	svc := streamExportTestService(t)
+	versionCode, versionBody := doStreamGet(t, "/stream-dev/version")
+	if versionCode != 200 {
+		t.Fatalf("version: status = %d", versionCode)
+	}
+	var version struct {
+		InstanceID         string `json:"instanceId"`
+		InstancePersistent bool   `json:"instancePersistent"`
+	}
+	if err := json.Unmarshal(versionBody, &version); err != nil {
+		t.Fatalf("version: decode: %v", err)
+	}
+	if version.InstanceID != svc.InstanceID() || !version.InstancePersistent {
+		t.Errorf("version: instance = %q persistent=%v, want %q true",
+			version.InstanceID, version.InstancePersistent, svc.InstanceID())
+	}
+	for _, path := range []string{
+		"/stream-dev/message?after=0&token=stream-test-token",
+		"/stream-dev/message?limit=-1&token=stream-test-token",
+	} {
+		code, body := doStreamGet(t, path)
+		if code != 200 {
+			t.Fatalf("%s: status = %d", path, code)
+		}
+		var env streamEnvelope
+		if err := json.Unmarshal(body, &env); err != nil {
+			t.Fatalf("%s: decode: %v", path, err)
+		}
+		if env.InstanceID != svc.InstanceID() || !env.InstancePersistent {
+			t.Errorf("%s: instance = %q persistent=%v, want %q true",
+				path, env.InstanceID, env.InstancePersistent, svc.InstanceID())
+		}
+	}
 }
 
 // TestExportStreamLimitNegative: ?limit=-1 streams the full device history as
