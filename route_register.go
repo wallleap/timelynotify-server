@@ -5,6 +5,7 @@ import (
 	"github.com/mritd/logger"
 
 	"github.com/wallleap/timelynotify-server/database"
+	"github.com/wallleap/timelynotify-server/internal/logging"
 )
 
 type DeviceInfo struct {
@@ -71,7 +72,7 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 	}
 
 	logger.Infof("[Register] registering device: key=%s platform=%s compat=%v",
-		deviceInfo.DeviceKey, platform, compat)
+		logging.MaskMiddle(deviceInfo.DeviceKey), platform, compat)
 
 	dbInfo := &database.DeviceInfo{
 		Key:      deviceInfo.DeviceKey,
@@ -81,12 +82,12 @@ func doRegister(c *fiber.Ctx, compat bool) error {
 
 	newKey, err := db.SaveDeviceInfo(dbInfo)
 	if err != nil {
-		logger.Errorf("[Register] failed: key=%s err=%v", deviceInfo.DeviceKey, err)
+		logger.Errorf("[Register] failed: key=%s err=%v", logging.MaskMiddle(deviceInfo.DeviceKey), err)
 		return c.Status(500).JSON(failed(500, "device registration failed: %v", err))
 	}
 	deviceInfo.DeviceKey = newKey
 
-	logger.Infof("[Register] success: key=%s platform=%s", newKey, platform)
+	logger.Infof("[Register] success: key=%s platform=%s", logging.MaskMiddle(newKey), platform)
 	return c.Status(200).JSON(data(map[string]string{
 		"key":          deviceInfo.DeviceKey,
 		"device_key":   deviceInfo.DeviceKey,

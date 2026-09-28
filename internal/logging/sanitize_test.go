@@ -91,6 +91,10 @@ func TestIsContentKey(t *testing.T) {
 		{"BODY", true},
 		{"markdown", true},
 		{"Markdown", true},
+		{"copy", true},
+		{"COPY", true},
+		{"data", true},
+		{"inboxContent", true},
 		{"ciphertext", true},
 		{"device_key", false},
 		{"device_token", false},
@@ -115,6 +119,8 @@ func TestMaskSensitiveFields(t *testing.T) {
 		"title":        "hello",
 		"body":         "world",
 		"subtitle":     "",
+		"markdown":     "**你好**",
+		"copy":         "验证码 123456",
 		"badge":        5, // non-string passthrough
 		"icon":         "https://example.com/x.png",
 	}
@@ -141,6 +147,12 @@ func TestMaskSensitiveFields(t *testing.T) {
 	}
 	if got, want := out["subtitle"].(string), "[len=0]"; got != want {
 		t.Errorf("subtitle = %q, want %q", got, want)
+	}
+	if got, want := out["markdown"].(string), "[len=6]"; got != want {
+		t.Errorf("markdown = %q, want %q", got, want)
+	}
+	if got, want := out["copy"].(string), "[len=10]"; got != want {
+		t.Errorf("copy = %q, want %q", got, want)
 	}
 
 	// Sensitive (short <12 chars) or non-sensitive non-content:
@@ -174,20 +186,67 @@ func TestMaskSensitiveFields_EmptyMap(t *testing.T) {
 }
 
 func TestMaskSensitiveFields_SensitiveNonStringValue(t *testing.T) {
-	// A sensitive key with a non-string value (e.g. token passed as number)
-	// passes through unchanged — masking only applies to string values.
 	in := map[string]interface{}{"token": 12345}
 	out := MaskSensitiveFields(in)
-	if out["token"] != 12345 {
-		t.Errorf("non-string sensitive value was altered: %v", out["token"])
+	if got, want := out["token"], "***"; got != want {
+		t.Errorf("non-string token = %v, want %v", got, want)
 	}
 }
 
 func TestMaskSensitiveFields_ContentNonStringValue(t *testing.T) {
-	// A content key with a non-string value also passes through.
 	in := map[string]interface{}{"title": 42}
 	out := MaskSensitiveFields(in)
-	if out["title"] != 42 {
-		t.Errorf("non-string content value was altered: %v", out["title"])
+	if got, want := out["title"], "[len=2]"; got != want {
+		t.Errorf("non-string title = %v, want %v", got, want)
+	}
+}
+
+func TestMaskSensitiveFields_StructuredValues(t *testing.T) {
+	in := map[string]interface{}{
+		"data":         "private data",
+		"inboxContent": []interface{}{"验证码 123456", "私密正文"},
+		"extras": map[string]interface{}{
+			"body":  "private body",
+			"token": "client-token",
+		},
+		"customList": []string{"secret one", "secret two"},
+		"badge":      5,
+	}
+	out := MaskSensitiveFields(in)
+	for key, want := range map[string]interface{}{
+		"data":         "[len=12]",
+		"inboxContent": "[items=2]",
+		"extras":       "[fields=2]",
+		"customList":   "[items=2]",
+		"badge":        5,
+	} {
+		if got := out[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+	if in["data"] != "private data" {
+		t.Fatal("input map was mutated")
+	}
+}
+
+func TestMaskContentQueryParams(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain copy", "GET /push?copy=123456&sound=bell", "GET /push?copy=[len=6]&sound=bell"},
+		{"encoded markdown", "GET /push?markdown=%E4%BD%A0%E5%A5%BD%20%2A%2A", "GET /push?markdown=[len=5]"},
+		{"mixed case", "GET /push?Copy=abc&MARKDOWN=x", "GET /push?Copy=[len=3]&MARKDOWN=[len=1]"},
+		{"empty", "GET /push?copy=&markdown=", "GET /push?copy=[len=0]&markdown=[len=0]"},
+		{"invalid escape", "GET /push?copy=%ZZ", "GET /push?copy=[len=3]"},
+		{"other query", "GET /push?icon=https%3A%2F%2Fexample.com", "GET /push?icon=https%3A%2F%2Fexample.com"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := MaskContentQueryParams(c.in); got != c.want {
+				t.Errorf("MaskContentQueryParams(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }

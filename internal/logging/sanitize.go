@@ -2,6 +2,9 @@ package logging
 
 import (
 	"fmt"
+	"net/url"
+	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -24,18 +27,23 @@ var sensitiveKeys = map[string]struct{}{
 // operator can tell a message with an empty body from one with a long one
 // without seeing the actual payload.
 var contentKeys = map[string]struct{}{
-	"title":     {},
-	"subtitle":  {},
-	"body":      {},
-	"markdown":  {},
-	"ciphertext": {}, // reserved for the upcoming user-key-encryption feature
+	"title":        {},
+	"subtitle":     {},
+	"body":         {},
+	"markdown":     {},
+	"copy":         {},
+	"data":         {},
+	"inboxcontent": {},
+	"ciphertext":   {}, // reserved for the upcoming user-key-encryption feature
 }
+
+var contentQueryParamRe = regexp.MustCompile(`(?i)[?&](?:markdown|copy)=[^&\s]*`)
 
 // MaskMiddle returns the input with its middle portion replaced by "***":
 //   - len < 12  -> "***"                    (full mask; middle would be <4 chars,
-//                                              too little to be meaningful)
+//     too little to be meaningful)
 //   - len >= 12 -> first4 + "***" + last4  (e.g. "abcdefghijk" -> "abcd***hijk";
-//                                              masks len-8 chars, guaranteed >=4)
+//     masks len-8 chars, guaranteed >=4)
 //
 // The threshold is derived from the mask budget: we always keep 4 chars at
 // each end and replace the middle with "***". That middle must hide at least
@@ -63,6 +71,20 @@ func MaskContent(s string) string {
 	return fmt.Sprintf("[len=%d]", utf8Len(s))
 }
 
+// MaskContentQueryParams replaces markdown/copy query values in an access-log
+// line with their decoded character counts. Malformed escapes are counted as
+// raw characters; their original values are never forwarded to the log.
+func MaskContentQueryParams(line string) string {
+	return contentQueryParamRe.ReplaceAllStringFunc(line, func(param string) string {
+		separator := strings.IndexByte(param, '=')
+		value := param[separator+1:]
+		if decoded, err := url.QueryUnescape(value); err == nil {
+			value = decoded
+		}
+		return param[:separator+1] + MaskContent(value)
+	})
+}
+
 // utf8Len returns the number of runes in s. Uses a simple range loop to
 // avoid importing the Unicode package for one function.
 func utf8Len(s string) int {
@@ -87,29 +109,57 @@ func IsContentKey(key string) bool {
 	return ok
 }
 
-// MaskSensitiveFields returns a shallow copy of m with three categories of
-// transformation applied per key (case-insensitive):
+// maskContentValue summarizes a value without including its contents. Text and
+// scalar values report character count; collections report item/field count.
+func maskContentValue(v interface{}) string {
+	if v == nil {
+		return "[len=0]"
+	}
+	if s, ok := v.(string); ok {
+		return MaskContent(s)
+	}
+	value := reflect.ValueOf(v)
+	switch value.Kind() {
+	case reflect.Map:
+		return fmt.Sprintf("[fields=%d]", value.Len())
+	case reflect.Array, reflect.Slice:
+		return fmt.Sprintf("[items=%d]", value.Len())
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64, reflect.String:
+		return MaskContent(fmt.Sprint(v))
+	default:
+		return "[redacted]"
+	}
+}
+
+// MaskSensitiveFields returns a shallow copy of m with values summarized by
+// key (case-insensitive):
 //
 //   - sensitive keys  (device_token, token, ...)     -> MaskMiddle (keep 4+4 chars)
-//   - content keys    (title, body, markdown, ...)   -> MaskContent ("[len=N]")
-//   - everything else                                 -> pass through untouched
+//   - content keys    (title, body, data, ...)       -> length/count placeholder
+//   - other collections                              -> opaque item/field count
+//   - other scalar values                            -> pass through untouched
 //
-// Non-string values in sensitive/content keys also pass through untouched —
-// masking only applies to string values. The original map is never mutated.
+// The original map and its nested values are never mutated.
 func MaskSensitiveFields(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		if sv, ok := v.(string); ok {
-			switch {
-			case IsSensitiveKey(k):
-				out[k] = MaskMiddle(sv)
-				continue
-			case IsContentKey(k):
-				out[k] = MaskContent(sv)
-				continue
+		switch {
+		case IsSensitiveKey(k):
+			if s, ok := v.(string); ok {
+				out[k] = MaskMiddle(s)
+			} else {
+				out[k] = "***"
 			}
+		case IsContentKey(k):
+			out[k] = maskContentValue(v)
+		case v != nil && (reflect.ValueOf(v).Kind() == reflect.Map ||
+			reflect.ValueOf(v).Kind() == reflect.Slice || reflect.ValueOf(v).Kind() == reflect.Array):
+			out[k] = maskContentValue(v)
+		default:
+			out[k] = v
 		}
-		out[k] = v
 	}
 	return out
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mritd/logger"
+	"github.com/wallleap/timelynotify-server/internal/logging"
 )
 
 type CommonResp struct {
@@ -94,13 +95,13 @@ func registerRouteWithWeight(name string, weight int, f func(router fiber.Router
 // base64url, so [^&\s]* covers the whole value.
 var tokenParamRe = regexp.MustCompile(`([?&]token=)[^&\s]*`)
 
-// redactingWriter masks the value of the "token" query parameter in whatever
-// it forwards, e.g. /stream?token=<clientToken> is logged as ?token=***.
-// Other query params and the request body pass through untouched.
+// redactingWriter masks token query values and replaces markdown/copy query
+// values with their lengths before forwarding an access-log line.
 type redactingWriter struct{ w io.Writer }
 
 func (r redactingWriter) Write(p []byte) (int, error) {
 	redacted := tokenParamRe.ReplaceAll(p, []byte(`${1}***`))
+	redacted = []byte(logging.MaskContentQueryParams(string(redacted)))
 	if _, err := r.w.Write(redacted); err != nil {
 		return 0, err
 	}
