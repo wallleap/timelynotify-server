@@ -93,6 +93,8 @@ TimelyNotify Server HTTP API 参考。兼容上游 Bark V1（URL 路径参数推
 
 `/push`、`/:device_key`（V1 兼容推送）、`/register`、`/mcp*` 默认不要求任何认证。`device_key` 本身就是凭证，需保证其私密性。未配置 Basic Auth 时，启动会在日志打印醒目 WARN 横幅提示。
 
+推送业务日志中的 `title`、`subtitle`、`body`、`markdown`、`copy`、`data`、`ciphertext` 等文本字段仅记录字符数（例如 `[len=6]`）；`inboxContent` 等数组和嵌套对象仅记录元素数或字段数，不记录内部值。`POST /register` 的 `device_key` 在业务日志中间脱敏。GET 请求 URL 中的 `markdown`、`copy` 查询参数在服务端访问日志中也仅显示字符数。请注意，反向代理等外部组件可能仍会记录原始 URL，应单独配置日志脱敏。
+
 ### 2. Basic Auth（可选全局门禁）
 
 通过 `--user`/`--password` 或 `BARK_SERVER_BASIC_AUTH_USER/PASSWORD` 开启。开启后，非白名单路径必须携带 `Authorization: Basic base64(user:password)`，否则返回 `418 I'm a teapot`。

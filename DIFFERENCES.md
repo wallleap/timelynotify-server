@@ -22,7 +22,7 @@
 | MySQL TLS | `--mysql-tls` 及配套 `mysql-ca`/`mysql-client-cert`/`mysql-client-key`/`mysql-tls-name`/`mysql-tls-skip-verify` | |
 | Gotify 客户端 token | `--gotify-client-token`：预置 token 仅持久化 SHA-256 哈希；自动生成 token 为保持重启稳定，会在权限为 0600 的 `gotify.db` 中保存明文并仅打印一次 | |
 | Gotify 消息上限 | `--gotify-max-messages`，配置监控消息保留条数（默认 `1000`） | |
-| 日志分级/JSON | `--log-level`（`debug` \| `info` \| `warn` \| `error`）与 `--log-format`（`console` \| `json`） | |
+| 日志分级/JSON 与内容脱敏 | `--log-level`（`debug` \| `info` \| `warn` \| `error`）与 `--log-format`（`console` \| `json`）；推送日志中的文本仅保留长度、数组和对象仅保留数量，注册日志中的 Key 中间脱敏；服务端访问日志中的 `markdown`、`copy` 查询参数仅保留长度 | [API.md](docs/API.md) |
 | Prometheus `/metrics` | `GET /metrics`，提供 HTTP 请求指标 + 活跃 `/stream` 连接数 + Go/进程指标 | |
 | 全局 `/version` 探测 | `GET /version`，以 `CommonResp` 格式返回 `data.version`，供 Bark/Hotify 客户端校验服务端身份；不在 Basic Auth 白名单（区别于设备级 `/:device_key/version` 与已移除的全局 gotify `/version`） | [API.md](docs/API.md) |
 | IP 限流 | `--rate-limit-ip` / `--rate-limit-burst`，按来源 IP 对 `/register` `/mcp*` 限流（429）；推送端点 `/push` `/:device_key` 默认不限流，可经 `--rate-limit-push` 开启 | |
