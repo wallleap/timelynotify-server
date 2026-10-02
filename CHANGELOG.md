@@ -1,11 +1,35 @@
 <a name="unreleased"></a>
 
+## [v0.7.3](https://github.com/wallleap/timelynotify-server/compare/v0.7.2...v0.7.3)
+
+> 2026-09-28
+
+### Documentation
+
+- 更新文档添加日志内容脱敏说明
+- 更新鸿蒙推送相关文档细节
+- 为 Gotify 兼容相关接口新增实例 ID 说明
+- 更新 Harmony level 策略及相关文档说明
+- 更新删除通知功能的服务端历史同步删除说明
+- 将通知撤回相关文档更新为兼容 Bark 的删除语义
+
+### Features
+
+- 为鸿蒙通知添加点击时的历史记录定位能力
+- 为Gotify兼容服务添加实例ID持久化标识
+- 支持通过 extras.id 删除消息并同步给已同步客户端 ```
+- 将 revoke 撤回功能改为 Bark 兼容的 delete 功能
+- **logging:** 新增内容查询参数脱敏和敏感字段增强脱敏
+- **pushpolicy:** 新增 Harmony 被动级推送策略，存储后同步
+
+
 ## [v0.7.2](https://github.com/wallleap/timelynotify-server/compare/v0.7.1...v0.7.2)
 
 > 2026-09-23
 
 ### Documentation
 
+- update CHANGELOG for v0.7.2
 - 更新 API 文档中 autoCopy 和 copy 字段的详细说明
 - 更新 HarmonyOS 推送相关文档说明
 - 更新 HarmonyOS 加密通知的占位文案说明
