@@ -835,9 +835,15 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 
 	// Bark `foregroundShow` controls the V3 notification.foregroundShow
 	// field: 1 → true (display notifications while the app is in the
-	// foreground), any other value → false. Default 1 when absent; the
-	// push() normalization block stores an int under the canonical key.
+	// foreground), any other value → false. Encrypted placeholder pushes
+	// default to 0; other pushes default to 1. An explicit value wins.
+	// push() stores an int under the canonical key when one is supplied.
+	ciphertext, _ := msg.ExtParams["ciphertext"].(string)
+	isEncrypted := strings.TrimSpace(ciphertext) != ""
 	foregroundShow := 1
+	if isEncrypted {
+		foregroundShow = 0
+	}
 	if v, ok := msg.ExtParams["foregroundShow"]; ok {
 		if n, err := toInt(numberToString(v)); err == nil {
 			foregroundShow = n
@@ -874,7 +880,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	// HarmonyOS messages use an ordinary Alert carrying only safe placeholder
 	// content. The opaque ciphertext and IV remain in the stored monitor
 	// message, so the app can fetch and decrypt them after the user opens it.
-	if ciphertext, ok := msg.ExtParams["ciphertext"].(string); ok && strings.TrimSpace(ciphertext) != "" {
+	if isEncrypted {
 		placeholderTitle, placeholderBody := pushpolicy.EncryptedPlaceholder(msg.ExtParams)
 		// A separately supplied Bark URL is intentionally a click target, not
 		// plaintext notification content; it takes precedence over action.

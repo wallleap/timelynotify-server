@@ -750,6 +750,51 @@ func TestHarmonyLevelDelivery(t *testing.T) {
 	}
 }
 
+func TestHarmonyForegroundShowDefaults(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		want  int
+	}{
+		{name: "plain default", want: 1},
+		{name: "plain explicit zero", extra: `,"foregroundShow":0`, want: 0},
+		{name: "empty ciphertext stays plain", extra: `,"ciphertext":"   "`, want: 1},
+		{name: "encrypted default", extra: `,"ciphertext":"secret-ciphertext","iv":"secret-iv"`, want: 0},
+		{name: "encrypted explicit zero", extra: `,"ciphertext":"secret-ciphertext","iv":"secret-iv","foregroundShow":0`, want: 0},
+		{name: "encrypted explicit one", extra: `,"ciphertext":"secret-ciphertext","iv":"secret-iv","foregroundShow":1`, want: 1},
+		{name: "encrypted explicit string one", extra: `,"ciphertext":"secret-ciphertext","iv":"secret-iv","foregroundShow":"1"`, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := gotifyService
+			svc, err := gotifycompat.Init(gotifycompat.Config{DataDir: t.TempDir(), ClientToken: "foreground-test-token"})
+			if err != nil {
+				t.Fatalf("init history: %v", err)
+			}
+			gotifyService = svc
+			t.Cleanup(func() { gotifyService = old; _ = svc.Close() })
+			registerHarmonyUnderTestKey(t, "harmony-foreground-token")
+
+			calls := 0
+			overridePushHarmony(t, func(_ []string, _, _, _, _ string, _ int, _ *int, _ string, _, foregroundShow int, _ []string, _ int) (int, int, error) {
+				calls++
+				if foregroundShow != tt.want {
+					t.Errorf("foregroundShow = %d, want %d", foregroundShow, tt.want)
+				}
+				return 200, 80000000, nil
+			})
+
+			res := doPush(t, "POST", "/push", `{"device_key":"`+key+`","platform":"harmony","title":"t","body":"b"`+tt.extra+`}`, true)
+			if res.StatusCode != 200 {
+				t.Fatalf("push status = %d, want 200: %s", res.StatusCode, decodeBody(t, res))
+			}
+			if calls != 1 {
+				t.Errorf("Harmony calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
 func TestHarmonyClickActionCarriesExactHistoryTarget(t *testing.T) {
 	tests := []struct {
 		name          string
