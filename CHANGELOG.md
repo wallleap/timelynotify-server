@@ -1,11 +1,21 @@
 <a name="unreleased"></a>
 
+## [v0.7.4](https://github.com/wallleap/timelynotify-server/compare/v0.7.3...v0.7.4)
+
+> 2026-10-17
+
+### Features
+
+- 为加密通知设置 foregroundShow 默认值为 0
+
+
 ## [v0.7.3](https://github.com/wallleap/timelynotify-server/compare/v0.7.2...v0.7.3)
 
-> 2026-09-28
+> 2026-10-02
 
 ### Documentation
 
+- update CHANGELOG for v0.7.3
 - 更新文档添加日志内容脱敏说明
 - 更新鸿蒙推送相关文档细节
 - 为 Gotify 兼容相关接口新增实例 ID 说明
