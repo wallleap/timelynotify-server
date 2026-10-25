@@ -277,7 +277,7 @@ V2 请求体 / V1 query+form 共用的推送字段（小写键名），按 Bark 
 | title    | string | 推送标题，显示在通知卡片的第一行；不传时通知只显示正文，服务端自动填 `"Bark"` | 同 iOS，服务端自动填 `"订阅通知"` |
 | subtitle | string | 推送副标题，显示在标题下方、正文上方的较小字号位置，适合放来源、状态之类的补充信息；不传则不显示这一行。设置了 `subtitle` 之后 `title` 和 `body` 必填 | 同 iOS（但系统通知卡片不会显示，仅在 App 里显示） |
 | body     | string | 推送正文，通知卡片上的主要内容；全空时服务端自动填 `"Empty Message"` | 同 iOS |
-| markdown | string | Markdown 正文，传了这个参数会忽略 `body`；支持加粗、斜体、删除线、链接、行内代码、代码块、1-6 级标题、引用、有序/无序列表、任务列表，图片在通知里降级为链接文本；发送时注意处理内容中的特殊字符 |      -     |
+| markdown | string | 非空时优先于 `body`；服务端透传原文，由 Bark 客户端解析系统通知并在 App 历史中保留 Markdown | 非空时服务端生成纯文本供系统通知、列表、搜索和复制全文使用，原文保留供 App 详情渲染 Markdown；解析后无内容则回退 `body`。链接和图片在纯文本中保留地址 |
 
 #### 设备
 
@@ -778,7 +778,7 @@ curl -X POST "http://127.0.0.1:18080/mcp/my-device" \
 | title       | string | 否                               | 通知标题                                          |
 | subtitle    | string | 否                               | 通知副标题                                         |
 | body        | string | 否                               | 通知正文                                          |
-| markdown    | string | 否                               | Markdown 正文，覆盖 `body`                         |
+| markdown    | string | 否                               | 非空时优先于 `body`；iOS 由 Bark 客户端解析，鸿蒙系统通知与列表使用服务端生成的纯文本，详情使用原始 Markdown |
 | level       | enum   | 否                               | `critical`/`active`/`timeSensitive`/`passive` |
 | volume      | number | 否                               | critical 通知音量，0-10，默认 5                       |
 | badge       | number | 否                               | App 图标角标数                                     |

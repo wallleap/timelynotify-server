@@ -31,7 +31,7 @@ func gotifyPublishWithID(msg *apns.PushMessage) (uint64, error) {
 		title = "TimelyNotify"
 	}
 
-	id, err := gotifyService.PublishWithID(title, msg.Body, gotifyPriority(extras), extras)
+	id, err := gotifyService.PublishWithID(title, readableBody(msg), gotifyPriority(extras), extras)
 	if err != nil {
 		return 0, fmt.Errorf("publish history: %w", err)
 	}

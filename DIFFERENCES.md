@@ -8,6 +8,7 @@
 
 | 功能 | 说明 | 文档 |
 | ----- | ----------- | ---- |
+| Harmony Markdown 纯文本降级 | 推送带 `markdown` 时，iOS 继续接收原始内容并由 Bark 客户端解析；鸿蒙系统通知和 Gotify 历史正文使用服务端生成的可读纯文本，历史附加字段保留原始 Markdown；未传或解析后无内容时回退到 `body` | [API.md](docs/API.md) |
 | Harmony 图片参数映射 | Bark `icon` 优先映射华为 `notification.image`，未提供 `icon` 时回退使用 Bark `image`；两者都没有时不发送图片字段。客户端仍分别保留 `icon` 与 `image` 的图标/正文图片语义 | [API.md](docs/API.md) |
 | Bark 归档与 TTL 语义对齐 | 接入 `isArchive`：缺省或 `1` 保持归档，显式关闭时普通通知不写监控历史；端到端加密的 Harmony 通知为完成本地解密而临时保留，客户端同步后删除且不落本地。正整数 `ttl` 继续控制远端历史过期，并透传给 Harmony 客户端用于本地历史过期清理 | [API.md](docs/API.md) |
 | HarmonyOS 端到端加密安全占位通知 | 检测非空 `ciphertext` 后使用普通 `push-type: 0` 发送安全占位内容：归档通知保持 `[订阅] 加密通知`，非归档通知改用 `[订阅] 加密即时通知` 并提示不会保存历史；未显式设置时 `foregroundShow` 默认 `0`，显式传值优先；密文与 IV 仅保留在监控历史供客户端打开后拉取并本地解密，服务端不保存 Key、不解密明文 | [API.md](docs/API.md) |

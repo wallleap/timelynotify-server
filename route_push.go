@@ -17,6 +17,7 @@ import (
 	"github.com/wallleap/timelynotify-server/database"
 	"github.com/wallleap/timelynotify-server/harmony"
 	"github.com/wallleap/timelynotify-server/internal/logging"
+	"github.com/wallleap/timelynotify-server/internal/markdowntext"
 	"github.com/wallleap/timelynotify-server/internal/pushpolicy"
 
 	"github.com/gofiber/fiber/v2"
@@ -756,6 +757,22 @@ func pushToDevice(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMes
 	return pushToAPNs(rid, deviceInfo, &m)
 }
 
+// readableBody supplies a plain-text fallback for channels that cannot render
+// Bark's markdown field. APNs still receives the original body and markdown.
+func readableBody(msg *apns.PushMessage) string {
+	if ciphertext, _ := msg.ExtParams["ciphertext"].(string); ciphertext != "" {
+		return msg.Body
+	}
+	markdown, _ := msg.ExtParams["markdown"].(string)
+	if markdown == "" {
+		return msg.Body
+	}
+	if plain := markdowntext.Plain(markdown); plain != "" {
+		return plain
+	}
+	return msg.Body
+}
+
 // pushToAPNs sends notification via APNs
 func pushToAPNs(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMessage) (int, error) {
 	code, err := pushAPNs(msg)
@@ -924,7 +941,7 @@ func pushToHarmony(rid string, deviceInfo *database.DeviceInfo, msg *apns.PushMe
 	_, hmsCode, err := pushHarmony(
 		[]string{deviceInfo.Token},
 		title,
-		msg.Body,
+		readableBody(msg),
 		dataStr,
 		iconStr,
 		actionType,
