@@ -1,8 +1,22 @@
 <a name="unreleased"></a>
 
+## [v0.7.5](https://github.com/wallleap/timelynotify-server/compare/v0.7.4...v0.7.5)
+
+> 2026-11-16
+
+### Features
+
+- 当 inboxContent 存在且无显式 body 时自动填充正文
+- 为鸿蒙和 Gotify 推送添加 Markdown 纯文本降级处理
+
+
 ## [v0.7.4](https://github.com/wallleap/timelynotify-server/compare/v0.7.3...v0.7.4)
 
 > 2026-10-17
+
+### Documentation
+
+- update CHANGELOG for v0.7.4
 
 ### Features
 
