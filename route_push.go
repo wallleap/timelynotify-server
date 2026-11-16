@@ -589,6 +589,14 @@ func push(rid string, params map[string]interface{}) (int, error) {
 			delete(msg.ExtParams, k)
 			if s := toInboxStrings(v); len(s) > 0 {
 				msg.ExtParams["inboxcontent"] = s
+				// inboxContent is the multi-line rendering of the same text.
+				// When no body is supplied, derive the plain body from it so
+				// the history record, the V3 `body` field and other platforms
+				// do not fall back to "Empty Message". An explicit body always
+				// wins; the original array is still forwarded separately.
+				if msg.Body == "" {
+					msg.Body = strings.Join(s, "\n")
+				}
 			}
 		}
 	}
